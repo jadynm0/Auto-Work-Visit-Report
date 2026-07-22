@@ -1,0 +1,106 @@
+import streamlit as st
+import pandas as pd
+
+st.set_page_config(page_title="Market Visit Report Generator", page_icon="📊", layout="wide")
+
+st.title("📊 Monthly Market Visit Performance Report Generator")
+st.write("Upload your monthly market visit Excel file to generate a structured report instantly.")
+
+# File Uploader Widget
+uploaded_file = st.file_uploader("Upload Excel File (.xlsx)", type=["xlsx"])
+
+if uploaded_file:
+    st.success("File uploaded successfully! Processing report...")
+    
+    try:
+        # ---------------------------------------------------------
+        # STEP 1: READ TARGETS SHEET
+        # ---------------------------------------------------------
+        df_targets = pd.read_excel(uploaded_file, sheet_name='Targets')
+        df_targets = df_targets.dropna(subset=['Channel', 'Target'])
+        df_targets['Channel'] = df_targets['Channel'].astype(str).str.strip()
+        TARGETS = dict(zip(df_targets['Channel'], df_targets['Target']))
+        
+        # ---------------------------------------------------------
+        # STEP 2: READ SURVEY DATA SHEET
+        # ---------------------------------------------------------
+        df_raw = pd.read_excel(uploaded_file, sheet_name='表格回應 1')
+        df_raw.columns = df_raw.iloc[0]
+        df = df_raw.iloc[1:].reset_index(drop=True)
+        
+        # Calculate actual counts
+        store_counts = df['店鋪'].value_counts()
+        actual_smkt = store_counts.get('Wellcome', 0) + store_counts.get('ParkNshop', 0)
+        actual_min_chain = store_counts.get('Aeon', 0) + store_counts.get("city'super", 0)
+
+        actuals = {
+            '7-11': store_counts.get('7-11', 0),
+            'Circle K': store_counts.get('Circle K', 0),
+            'SMKT': actual_smkt,
+            'Min.Chain': actual_min_chain,
+            '佳寶': store_counts.get('佳寶', 0)
+        }
+
+        # ---------------------------------------------------------
+        # STEP 3: BUILD REPORT TEXT
+        # ---------------------------------------------------------
+        districts = ", ".join(df['地區'].dropna().unique().tolist())
+
+        report = f"""==================================================
+MONTHLY MARKET VISIT PERFORMANCE REPORT
+==================================================
+Processed File : {uploaded_file.name}
+
+[Overview Summary]
+- Total Regions Checked : {df['地區'].dropna().nunique()} districts
+- Covered Regions       : {districts}
+- Total Stores Audited  : {len(df)} KA Branches
+
+[KPI Performance Tracking (Target vs Actual)]
+"""
+
+        for channel, target in TARGETS.items():
+            actual = actuals.get(channel, 0)
+            status = "Target Met 🟢" if actual >= target else "MISSED TARGET ❌"
+            report += f"- {channel:<10}: Goal {target:>3} stores | Actual: {actual:>3} stores -> ({status})\n"
+
+        def analyze_channel_products(df_store, store_name, item_type="Fresh"):
+            report_section = f"\n[{store_name} - {item_type} Product Coverage Summary]\n"
+            cols = [c for c in df_store.columns if str(c).startswith('架上情況 [')]
+            
+            for col in cols:
+                clean_name = col.replace('架上情況 [', '').replace(']', '')
+                total_stores = len(df_store)
+                if total_stores == 0: 
+                    continue
+                    
+                in_stock = df_store[col].astype(str).str.contains('有貨').sum()
+                oos = df_store[col].astype(str).str.contains('缺貨').sum()
+                rate = (in_stock / total_stores) * 100
+                
+                if in_stock > 0 or oos > 0:
+                    report_section += f"  * {clean_name:<15} | On-Shelf: {in_stock:>2} | OOS: {oos:>2} | Coverage: {rate:>5.1f}%\n"
+            return report_section
+
+        report += analyze_channel_products(df[df['店鋪'] == '7-11'], "7-11", "Freshly Made")
+        report += analyze_channel_products(df[df['店鋪'] == 'Circle K'], "Circle K", "Fresh & Pre-packaged")
+
+        # ---------------------------------------------------------
+        # STEP 4: DISPLAY IN WEB UI
+        # ---------------------------------------------------------
+        st.subheader("📋 Generated Report Output")
+        
+        # Scrollable text area for easy copying
+        st.text_area("Copyable Report Text", value=report, height=450)
+        
+        # Download button for text file
+        st.download_button(
+            label="💾 Download Report (.txt)",
+            data=report,
+            file_name=f"Market_Visit_Report_{uploaded_file.name.replace('.xlsx', '')}.txt",
+            mime="text/plain"
+        )
+        
+    except Exception as e:
+        st.error(f"❌ Error processing file: {e}")
+        st.info("Please make sure your file is a valid .xlsx file containing both '表格回應 1' and 'Targets' sheets.")
