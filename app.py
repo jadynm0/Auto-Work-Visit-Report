@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 
+# Page Configuration
 st.set_page_config(page_title="Market Visit Report Generator", page_icon="📊", layout="wide")
 
 st.title("📊 Monthly Market Visit Performance Report Generator")
@@ -14,12 +15,27 @@ if uploaded_file:
     
     try:
         # ---------------------------------------------------------
-        # STEP 1: READ TARGETS SHEET
+        # STEP 1: READ TARGETS SHEET (SMART & FLEXIBLE)
         # ---------------------------------------------------------
         df_targets = pd.read_excel(uploaded_file, sheet_name='Targets')
-        df_targets = df_targets.dropna(subset=['Channel', 'Target'])
-        df_targets['Channel'] = df_targets['Channel'].astype(str).str.strip()
-        TARGETS = dict(zip(df_targets['Channel'], df_targets['Target']))
+        
+        # Strip trailing spaces from column headers
+        df_targets.columns = [str(c).strip() for c in df_targets.columns]
+        
+        # Standardize column lookup (case-insensitive)
+        col_map = {str(c).lower(): c for c in df_targets.columns}
+        
+        if 'channel' in col_map and 'target' in col_map:
+            channel_col = col_map['channel']
+            target_col = col_map['target']
+        else:
+            # Fallback to the first two columns if headers are named differently
+            channel_col = df_targets.columns[0]
+            target_col = df_targets.columns[1]
+
+        df_targets = df_targets.dropna(subset=[channel_col, target_col])
+        df_targets[channel_col] = df_targets[channel_col].astype(str).str.strip()
+        TARGETS = dict(zip(df_targets[channel_col], df_targets[target_col]))
         
         # ---------------------------------------------------------
         # STEP 2: READ SURVEY DATA SHEET
@@ -89,11 +105,8 @@ Processed File : {uploaded_file.name}
         # STEP 4: DISPLAY IN WEB UI
         # ---------------------------------------------------------
         st.subheader("📋 Generated Report Output")
-        
-        # Scrollable text area for easy copying
         st.text_area("Copyable Report Text", value=report, height=450)
         
-        # Download button for text file
         st.download_button(
             label="💾 Download Report (.txt)",
             data=report,
