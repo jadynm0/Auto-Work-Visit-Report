@@ -15,26 +15,27 @@ if uploaded_file:
     
     try:
         # ---------------------------------------------------------
-        # STEP 1: READ TARGETS SHEET (SMART & FLEXIBLE)
+        # STEP 1: READ TARGETS SHEET (TYPE-SAFE)
         # ---------------------------------------------------------
         df_targets = pd.read_excel(uploaded_file, sheet_name='Targets')
         
-        # Strip trailing spaces from column headers
+        # Clean column headers
         df_targets.columns = [str(c).strip() for c in df_targets.columns]
-        
-        # Standardize column lookup (case-insensitive)
         col_map = {str(c).lower(): c for c in df_targets.columns}
         
         if 'channel' in col_map and 'target' in col_map:
             channel_col = col_map['channel']
             target_col = col_map['target']
         else:
-            # Fallback to the first two columns if headers are named differently
             channel_col = df_targets.columns[0]
             target_col = df_targets.columns[1]
 
         df_targets = df_targets.dropna(subset=[channel_col, target_col])
         df_targets[channel_col] = df_targets[channel_col].astype(str).str.strip()
+        
+        # Ensure Target values are strictly numeric integers
+        df_targets[target_col] = pd.to_numeric(df_targets[target_col], errors='coerce').fillna(0).astype(int)
+        
         TARGETS = dict(zip(df_targets[channel_col], df_targets[target_col]))
         
         # ---------------------------------------------------------
@@ -46,15 +47,15 @@ if uploaded_file:
         
         # Calculate actual counts
         store_counts = df['店鋪'].value_counts()
-        actual_smkt = store_counts.get('Wellcome', 0) + store_counts.get('ParkNshop', 0)
-        actual_min_chain = store_counts.get('Aeon', 0) + store_counts.get("city'super", 0)
+        actual_smkt = int(store_counts.get('Wellcome', 0) + store_counts.get('ParkNshop', 0))
+        actual_min_chain = int(store_counts.get('Aeon', 0) + store_counts.get("city'super", 0))
 
         actuals = {
-            '7-11': store_counts.get('7-11', 0),
-            'Circle K': store_counts.get('Circle K', 0),
+            '7-11': int(store_counts.get('7-11', 0)),
+            'Circle K': int(store_counts.get('Circle K', 0)),
             'SMKT': actual_smkt,
             'Min.Chain': actual_min_chain,
-            '佳寶': store_counts.get('佳寶', 0)
+            '佳寶': int(store_counts.get('佳寶', 0))
         }
 
         # ---------------------------------------------------------
@@ -75,8 +76,9 @@ Processed File : {uploaded_file.name}
 [KPI Performance Tracking (Target vs Actual)]
 """
 
-        for channel, target in TARGETS.items():
-            actual = actuals.get(channel, 0)
+        for channel, raw_target in TARGETS.items():
+            actual = int(actuals.get(channel, 0))
+            target = int(raw_target)
             status = "Target Met 🟢" if actual >= target else "MISSED TARGET ❌"
             report += f"- {channel:<10}: Goal {target:>3} stores | Actual: {actual:>3} stores -> ({status})\n"
 
