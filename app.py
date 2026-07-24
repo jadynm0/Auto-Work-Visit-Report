@@ -106,7 +106,6 @@ if uploaded_file:
         st.divider()
         st.header("🔍 Interactive Analysis (Channel or Overall)")
         
-        # Add "All Stores (Overall)" as the top default option
         channel_options = ["All Stores (Overall)"] + df_summary['Channel'].tolist()
         selected_ch = st.selectbox("Select View:", options=channel_options)
 
@@ -123,7 +122,7 @@ if uploaded_file:
             m1.metric("Target Visit", ch_target)
             m2.metric("Actual Visit", ch_actual)
 
-        # CHOICE COVERAGE RANGE MATRIX (0, 1-4, 5-9, >9)
+        # CHOICE COVERAGE RANGE MATRIX
         st.subheader(f"📊 {selected_ch} - Choice Coverage Breakdown")
         if len(df_ch) > 0 and len(sku_cols) > 0:
             in_stock_counts = df_ch[sku_cols].apply(lambda row: row.astype(str).str.contains('有貨').sum(), axis=1)
@@ -165,18 +164,35 @@ if uploaded_file:
             st.info("No visit records found.")
 
         # ---------------------------------------------------------
-        # SECTION 3: MULTI-TAB EXCEL EXPORT WORKBOOK GENERATOR
+        # SECTION 3: BEAUTIFIED EXCEL EXPORT WITH AUTO-COLUMN WIDTHS
         # ---------------------------------------------------------
         st.divider()
-        st.header("📥 Download Excel Summary")
+        st.header("📥 Download Formatted Excel Summary")
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # 1. Summary Sheet
-            df_summary.to_excel(writer, sheet_name='Summary', index=False)
-            
             workbook = writer.book
-            worksheet_summary = writer.sheets['Summary']
+            
+            # Custom Excel Formats
+            header_fmt = workbook.add_format({'bold': True, 'bg_color': '#4F81BD', 'font_color': 'white', 'border': 1, 'align': 'center'})
+            cell_fmt = workbook.add_format({'border': 1, 'align': 'center'})
+            
+            def export_styled_sheet(df_data, sheet_name):
+                df_data.to_excel(writer, sheet_name=sheet_name, index=False)
+                ws = writer.sheets[sheet_name]
+                
+                # Auto-adjust column widths dynamically
+                for col_idx, col in enumerate(df_data.columns):
+                    max_len = max(
+                        df_data[col].astype(str).map(len).max(),
+                        len(str(col))
+                    ) + 5
+                    ws.set_column(col_idx, col_idx, max(max_len, 12), cell_fmt)
+                    ws.write(0, col_idx, col, header_fmt)
+
+            # 1. Summary Sheet
+            export_styled_sheet(df_summary, 'Summary')
+            ws_summary = writer.sheets['Summary']
             
             chart = workbook.add_chart({'type': 'doughnut'})
             max_row = len(df_summary) + 1
@@ -187,7 +203,7 @@ if uploaded_file:
                 'data_labels': {'percentage': True},
             })
             chart.set_title({'name': 'channel/actual visit'})
-            worksheet_summary.insert_chart('G2', chart)
+            ws_summary.insert_chart('G2', chart)
 
             # Helper function for Excel tables
             def build_dynamic_sku_table(sub_df):
@@ -211,9 +227,9 @@ if uploaded_file:
                     })
                 return pd.DataFrame(sku_records)
 
-            # 2. Overall Sheet (All 170 Stores Combined)
+            # 2. Overall Sheet (All Stores Combined)
             df_overall_skus = build_dynamic_sku_table(df)
-            df_overall_skus.to_excel(writer, sheet_name='All Stores (Overall)', index=False)
+            export_styled_sheet(df_overall_skus, 'All Stores (Overall)')
 
             # 3. Dynamic Sheets per Channel
             for ch_label in df_summary['Channel']:
@@ -223,10 +239,10 @@ if uploaded_file:
                 
                 sheet_title = str(ch_label).replace(':', '').replace('/', '-')[:30]
                 df_ch_skus = build_dynamic_sku_table(sub_df)
-                df_ch_skus.to_excel(writer, sheet_name=sheet_title, index=False)
+                export_styled_sheet(df_ch_skus, sheet_title)
 
         st.download_button(
-            label="🟢 Download Dynamic Multi-Tab Excel Report (.xlsx)",
+            label="🟢 Download Formatted Multi-Tab Excel Report (.xlsx)",
             data=output.getvalue(),
             file_name=f"Market_Visit_Summary_{uploaded_file.name}",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
