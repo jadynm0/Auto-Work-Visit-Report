@@ -180,18 +180,19 @@ if uploaded_file:
         else:
             st.info("No visit response records found for this selected channel.")
 
-        # ---------------------------------------------------------
-        # DOWNLOAD EXCEL
+       # ---------------------------------------------------------
+        # DOWNLOAD MULTI-TAB EXCEL WORKBOOK
         # ---------------------------------------------------------
         st.divider()
         st.header("📥 Download Excel Summary")
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # TAB 1: Channel Summary & Donut Chart
             df_summary.to_excel(writer, sheet_name='Summary', index=False)
             
             workbook = writer.book
-            worksheet = writer.sheets['Summary']
+            worksheet_summary = writer.sheets['Summary']
             
             chart = workbook.add_chart({'type': 'doughnut'})
             max_row = len(df_summary) + 1
@@ -202,10 +203,41 @@ if uploaded_file:
                 'data_labels': {'percentage': True},
             })
             chart.set_title({'name': 'channel/actual visit'})
-            worksheet.insert_chart('G2', chart)
+            worksheet_summary.insert_chart('H2', chart)
+
+            # TAB 2: Full SKU Shelf Breakdown for ALL Channels
+            sku_cols = [c for c in df.columns if str(c).startswith('架上情況 [')]
+            all_sku_details = []
+            
+            for channel in df_summary['Channel']:
+                df_ch = df[df['店鋪_clean'].str.contains(channel, na=False)] if channel != 'SMKT' else df[df['店鋪_clean'].isin(['Wellcome', 'ParkNshop'])]
+                tot_v = len(df_ch)
+                if tot_v == 0:
+                    continue
+                    
+                for col in sku_cols:
+                    clean_sku = col.replace('架上情況 [', '').replace(']', '').strip()
+                    col_s = df_ch[col].astype(str)
+                    
+                    has_stock = col_s.str.contains('有貨').sum()
+                    oos_tag = col_s.str.contains('缺貨').sum()
+                    no_tag = col_s.str.contains('無貨').sum()
+                    cov = round((has_stock / tot_v) * 100, 1)
+                    
+                    all_sku_details.append({
+                        "Channel": channel,
+                        "Product SKU": clean_sku,
+                        "有貨有牌仔": has_stock,
+                        "缺貨有牌仔": oos_tag,
+                        "無貨無牌仔 / 無貨唔牌仔": no_tag,
+                        "Selling Coverage (%)": cov
+                    })
+            
+            df_all_skus = pd.DataFrame(all_sku_details)
+            df_all_skus.to_excel(writer, sheet_name='SKU Breakdown', index=False)
 
         st.download_button(
-            label="🟢 Download Excel Workbook (.xlsx)",
+            label="🟢 Download Complete Excel Report (.xlsx)",
             data=output.getvalue(),
             file_name=f"Market_Visit_Summary_{uploaded_file.name}",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
