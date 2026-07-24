@@ -122,7 +122,7 @@ if uploaded_file:
             m1.metric("Target Visit", ch_target)
             m2.metric("Actual Visit", ch_actual)
 
-        # CHOICE COVERAGE RANGE MATRIX
+        # CHOICE COVERAGE RANGE MATRIX (0, 1-4, 5-9, >9)
         st.subheader(f"📊 {selected_ch} - Choice Coverage Breakdown")
         if len(df_ch) > 0 and len(sku_cols) > 0:
             in_stock_counts = df_ch[sku_cols].apply(lambda row: row.astype(str).str.contains('有貨').sum(), axis=1)
@@ -164,10 +164,10 @@ if uploaded_file:
             st.info("No visit records found.")
 
         # ---------------------------------------------------------
-        # SECTION 3: BEAUTIFIED EXCEL EXPORT WITH AUTO-COLUMN WIDTHS
+        # SECTION 3: MULTI-TAB EXCEL EXPORT WITH CHOICE COVERAGE & AUTO-WIDTHS
         # ---------------------------------------------------------
         st.divider()
-        st.header("📥 Download Formatted Excel Summary")
+        st.header("📥 Download Complete Formatted Excel Summary")
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -177,23 +177,15 @@ if uploaded_file:
             header_fmt = workbook.add_format({'bold': True, 'bg_color': '#4F81BD', 'font_color': 'white', 'border': 1, 'align': 'center'})
             cell_fmt = workbook.add_format({'border': 1, 'align': 'center'})
             
-            def export_styled_sheet(df_data, sheet_name):
-                df_data.to_excel(writer, sheet_name=sheet_name, index=False)
-                ws = writer.sheets[sheet_name]
-                
-                # Auto-adjust column widths dynamically
-                for col_idx, col in enumerate(df_data.columns):
-                    max_len = max(
-                        df_data[col].astype(str).map(len).max(),
-                        len(str(col))
-                    ) + 5
-                    ws.set_column(col_idx, col_idx, max(max_len, 12), cell_fmt)
-                    ws.write(0, col_idx, col, header_fmt)
-
             # 1. Summary Sheet
-            export_styled_sheet(df_summary, 'Summary')
+            df_summary.to_excel(writer, sheet_name='Summary', index=False)
             ws_summary = writer.sheets['Summary']
             
+            for col_idx, col in enumerate(df_summary.columns):
+                max_len = max(df_summary[col].astype(str).map(len).max(), len(str(col))) + 5
+                ws_summary.set_column(col_idx, col_idx, max(max_len, 12), cell_fmt)
+                ws_summary.write(0, col_idx, col, header_fmt)
+
             chart = workbook.add_chart({'type': 'doughnut'})
             max_row = len(df_summary) + 1
             chart.add_series({
@@ -205,14 +197,30 @@ if uploaded_file:
             chart.set_title({'name': 'channel/actual visit'})
             ws_summary.insert_chart('G2', chart)
 
-            # Helper function for Excel tables
-            def build_dynamic_sku_table(sub_df):
+            # Helper function to write Choice Coverage Matrix + Detailed SKU Table to any Excel sheet
+            def export_detailed_channel_sheet(sub_df, sheet_name):
                 tot_visits = len(sub_df)
+                if tot_visits == 0:
+                    return
+
+                # Calculate Choice Coverage Range Matrix
+                in_stock_counts = sub_df[sku_cols].apply(lambda row: row.astype(str).str.contains('有貨').sum(), axis=1)
+                c_0 = (in_stock_counts == 0).sum()
+                c_1_4 = ((in_stock_counts >= 1) & (in_stock_counts <= 4)).sum()
+                c_5_9 = ((in_stock_counts >= 5) & (in_stock_counts <= 9)).sum()
+                c_gt_9 = (in_stock_counts > 9).sum()
+
+                df_choice_matrix = pd.DataFrame([
+                    {"Choice Coverage Range": "0 SKUs", "Store Count": c_0, "Share (%)": f"{round((c_0/tot_visits)*100, 1)}%"},
+                    {"Choice Coverage Range": "1-4 SKUs", "Store Count": c_1_4, "Share (%)": f"{round((c_1_4/tot_visits)*100, 1)}%"},
+                    {"Choice Coverage Range": "5-9 SKUs", "Store Count": c_5_9, "Share (%)": f"{round((c_5_9/tot_visits)*100, 1)}%"},
+                    {"Choice Coverage Range": ">9 SKUs", "Store Count": c_gt_9, "Share (%)": f"{round((c_gt_9/tot_visits)*100, 1)}%"},
+                ])
+
+                # Build SKU Detailed Table
                 sku_records = []
-                
                 for orig_col, clean_name in sku_mapping.items():
                     col_series = sub_df[orig_col].astype(str)
-                    
                     has_stock = col_series.str.contains('有貨').sum()
                     oos_tag = col_series.str.contains('缺貨').sum()
                     no_tag = col_series.str.contains('無貨').sum()
@@ -225,24 +233,43 @@ if uploaded_file:
                         "無貨無牌仔 / 無貨唔牌仔": no_tag,
                         "Coverage (%)": f"{cov}%"
                     })
-                return pd.DataFrame(sku_records)
+                df_sku_details = pd.DataFrame(sku_records)
+
+                # Write Matrix at row 0
+                df_choice_matrix.to_excel(writer, sheet_name=sheet_name, startrow=0, index=False)
+                
+                # Write SKU details table starting at row 7
+                df_sku_details.to_excel(writer, sheet_name=sheet_name, startrow=7, index=False)
+
+                ws = writer.sheets[sheet_name]
+
+                # Format Choice Matrix headers
+                for col_idx, col in enumerate(df_choice_matrix.columns):
+                    ws.write(0, col_idx, col, header_fmt)
+
+                # Format SKU Details headers (row 7)
+                for col_idx, col in enumerate(df_sku_details.columns):
+                    ws.write(7, col_idx, col, header_fmt)
+
+                # Auto-adjust column widths
+                for col_idx, col in enumerate(df_sku_details.columns):
+                    max_len = max(
+                        df_sku_details[col].astype(str).map(len).max(),
+                        len(str(col))
+                    ) + 5
+                    ws.set_column(col_idx, col_idx, max(max_len, 15), cell_fmt)
 
             # 2. Overall Sheet (All Stores Combined)
-            df_overall_skus = build_dynamic_sku_table(df)
-            export_styled_sheet(df_overall_skus, 'All Stores (Overall)')
+            export_detailed_channel_sheet(df, 'All Stores (Overall)')
 
             # 3. Dynamic Sheets per Channel
             for ch_label in df_summary['Channel']:
                 sub_df = df[df['店鋪_clean'].str.contains(ch_label, na=False)]
-                if len(sub_df) == 0:
-                    continue
-                
                 sheet_title = str(ch_label).replace(':', '').replace('/', '-')[:30]
-                df_ch_skus = build_dynamic_sku_table(sub_df)
-                export_styled_sheet(df_ch_skus, sheet_title)
+                export_detailed_channel_sheet(sub_df, sheet_title)
 
         st.download_button(
-            label="🟢 Download Formatted Multi-Tab Excel Report (.xlsx)",
+            label="🟢 Download Complete Formatted Excel Report (.xlsx)",
             data=output.getvalue(),
             file_name=f"Market_Visit_Summary_{uploaded_file.name}",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
