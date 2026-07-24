@@ -181,14 +181,16 @@ if uploaded_file:
             st.info("No visit response records found for this selected channel.")
 
        # ---------------------------------------------------------
-        # DOWNLOAD MULTI-TAB EXCEL WORKBOOK
+        # DOWNLOAD MULTI-TAB EXCEL WORKBOOK (ONE TAB PER CHANNEL)
         # ---------------------------------------------------------
         st.divider()
         st.header("📥 Download Excel Summary")
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # TAB 1: Channel Summary & Donut Chart
+            # -----------------------------------------------------
+            # TAB 1: Overall Summary & Donut Chart
+            # -----------------------------------------------------
             df_summary.to_excel(writer, sheet_name='Summary', index=False)
             
             workbook = writer.book
@@ -205,16 +207,50 @@ if uploaded_file:
             chart.set_title({'name': 'channel/actual visit'})
             worksheet_summary.insert_chart('H2', chart)
 
-            # TAB 2: Full SKU Shelf Breakdown for ALL Channels
+            # -----------------------------------------------------
+            # CREATE A DEDICATED SHEET FOR EACH CHANNEL
+            # -----------------------------------------------------
             sku_cols = [c for c in df.columns if str(c).startswith('架上情況 [')]
-            all_sku_details = []
             
             for channel in df_summary['Channel']:
+                # Filter channel survey responses
                 df_ch = df[df['店鋪_clean'].str.contains(channel, na=False)] if channel != 'SMKT' else df[df['店鋪_clean'].isin(['Wellcome', 'ParkNshop'])]
                 tot_v = len(df_ch)
                 if tot_v == 0:
                     continue
-                    
+                
+                # Fetch summary row stats
+                ch_row = df_summary[df_summary['Channel'] == channel].iloc[0]
+                
+                # Sheet name cleanup (Excel tab names max 31 chars)
+                sheet_title = channel.replace(':', '').replace('/', '-')[:30]
+                
+                # 1. KPI Summary Header
+                header_data = pd.DataFrame([
+                    {"Metric": "Total Shop in HK", "Value": ch_row['Total Shop in HK']},
+                    {"Metric": "Target Visit", "Value": ch_row['Target Visit']},
+                    {"Metric": "Actual Visit", "Value": ch_row['Actual Visit']},
+                    {"Metric": "探店 Coverage Rate", "Value": f"{ch_row['Coverage (%)']}%"}
+                ])
+                header_data.to_excel(writer, sheet_name=sheet_title, startrow=0, index=False)
+                
+                # 2. Choice Coverage Breakdown Matrix
+                in_stock_counts = df_ch[sku_cols].apply(lambda row: row.astype(str).str.contains('有貨').sum(), axis=1)
+                c_0 = (in_stock_counts == 0).sum()
+                c_1_4 = ((in_stock_counts >= 1) & (in_stock_counts <= 4)).sum()
+                c_5_9 = ((in_stock_counts >= 5) & (in_stock_counts <= 9)).sum()
+                c_gt_9 = (in_stock_counts > 9).sum()
+                
+                choice_df = pd.DataFrame([
+                    {"Choice Coverage Range": "0 SKUs", "Store Count": c_0, "Share (%)": f"{round((c_0/tot_v)*100, 1)}%"},
+                    {"Choice Coverage Range": "1-4 SKUs", "Store Count": c_1_4, "Share (%)": f"{round((c_1_4/tot_v)*100, 1)}%"},
+                    {"Choice Coverage Range": "5-9 SKUs", "Store Count": c_5_9, "Share (%)": f"{round((c_5_9/tot_v)*100, 1)}%"},
+                    {"Choice Coverage Range": ">9 SKUs", "Store Count": c_gt_9, "Share (%)": f"{round((c_gt_9/tot_v)*100, 1)}%"},
+                ])
+                choice_df.to_excel(writer, sheet_name=sheet_title, startrow=7, index=False)
+                
+                # 3. Detailed SKU Status Table
+                channel_sku_details = []
                 for col in sku_cols:
                     clean_sku = col.replace('架上情況 [', '').replace(']', '').strip()
                     col_s = df_ch[col].astype(str)
@@ -224,20 +260,19 @@ if uploaded_file:
                     no_tag = col_s.str.contains('無貨').sum()
                     cov = round((has_stock / tot_v) * 100, 1)
                     
-                    all_sku_details.append({
-                        "Channel": channel,
+                    channel_sku_details.append({
                         "Product SKU": clean_sku,
                         "有貨有牌仔": has_stock,
                         "缺貨有牌仔": oos_tag,
                         "無貨無牌仔 / 無貨唔牌仔": no_tag,
-                        "Selling Coverage (%)": cov
+                        "Selling Coverage (%)": f"{cov}%"
                     })
-            
-            df_all_skus = pd.DataFrame(all_sku_details)
-            df_all_skus.to_excel(writer, sheet_name='SKU Breakdown', index=False)
+                
+                df_sku = pd.DataFrame(channel_sku_details)
+                df_sku.to_excel(writer, sheet_name=sheet_title, startrow=15, index=False)
 
         st.download_button(
-            label="🟢 Download Complete Excel Report (.xlsx)",
+            label="🟢 Download Multi-Tab Excel Report (.xlsx)",
             data=output.getvalue(),
             file_name=f"Market_Visit_Summary_{uploaded_file.name}",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
