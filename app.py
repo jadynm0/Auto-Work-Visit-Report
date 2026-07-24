@@ -20,13 +20,11 @@ if uploaded_file:
         df_raw.columns = [str(c).strip() for c in df_raw.iloc[0]]
         df = df_raw.iloc[1:].reset_index(drop=True)
         
-        # Clean store names dynamically
         df['店鋪_clean'] = df['店鋪'].astype(str).str.strip()
         
-        # Extract ALL product columns dynamically from headers starting with '架上情況 ['
+        # Extract ALL product columns dynamically
         sku_cols = [c for c in df.columns if '架上情況 [' in str(c)]
         
-        # Extract clean product names dynamically using regex
         def clean_sku_name(col_name):
             match = re.search(r'\[(.*?)\]', str(col_name))
             return match.group(1).strip() if match else str(col_name).strip()
@@ -84,7 +82,7 @@ if uploaded_file:
         df_summary = pd.DataFrame(summary_rows)
 
         # ---------------------------------------------------------
-        # SECTION 1: OVERALL DASHBOARD & PLOTLY DONUT CHART
+        # SECTION 1: OVERALL KPI DASHBOARD & PLOTLY DONUT
         # ---------------------------------------------------------
         st.divider()
         st.header("📌 Overall Market Visit Summary")
@@ -103,21 +101,27 @@ if uploaded_file:
             st.plotly_chart(fig, use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 2: INTERACTIVE "BY CHANNEL" ANALYSIS (WEB DISPLAY)
+        # SECTION 2: INTERACTIVE "BY CHANNEL" OR "ALL STORES (OVERALL)"
         # ---------------------------------------------------------
         st.divider()
-        st.header("🔍 Interactive Analysis By Channel")
+        st.header("🔍 Interactive Analysis (Channel or Overall)")
         
-        channel_options = df_summary['Channel'].tolist()
-        selected_ch = st.selectbox("By channel:", options=channel_options)
+        # Add "All Stores (Overall)" as the top default option
+        channel_options = ["All Stores (Overall)"] + df_summary['Channel'].tolist()
+        selected_ch = st.selectbox("Select View:", options=channel_options)
 
-        df_ch = df[df['店鋪_clean'].str.contains(selected_ch, na=False)]
-        ch_target = targets_dict.get(selected_ch, 0)
-        ch_actual = len(df_ch)
+        if selected_ch == "All Stores (Overall)":
+            df_ch = df
+            st.subheader("🌐 Overall (All Brands / Shops Combined)")
+            st.metric("Total Stores Audited", len(df_ch))
+        else:
+            df_ch = df[df['店鋪_clean'].str.contains(selected_ch, na=False)]
+            ch_target = targets_dict.get(selected_ch, 0)
+            ch_actual = len(df_ch)
 
-        m1, m2 = st.columns(2)
-        m1.metric("Target Visit", ch_target)
-        m2.metric("Actual Visit", ch_actual)
+            m1, m2 = st.columns(2)
+            m1.metric("Target Visit", ch_target)
+            m2.metric("Actual Visit", ch_actual)
 
         # CHOICE COVERAGE RANGE MATRIX (0, 1-4, 5-9, >9)
         st.subheader(f"📊 {selected_ch} - Choice Coverage Breakdown")
@@ -138,7 +142,7 @@ if uploaded_file:
             ])
             st.dataframe(df_choice, use_container_width=True)
 
-            # SKU SHELF STATUS TABLE ON WEB PAGE
+            # DETAILED SKU SHELF STATUS TABLE
             st.subheader(f"🛒 {selected_ch} - Detailed SKU Shelf Status")
             sku_details = []
             for orig_col, clean_name in sku_mapping.items():
@@ -154,11 +158,11 @@ if uploaded_file:
                     "有貨有牌仔": has_stock,
                     "缺貨有牌仔": oos_tag,
                     "無貨無牌仔 / 無貨唔牌仔": no_tag,
-                    "Selling Coverage (%)": f"{cov}%"
+                    "Product Coverage (%)": f"{cov}%"
                 })
             st.dataframe(pd.DataFrame(sku_details), use_container_width=True)
         else:
-            st.info("No visit records found for this selected channel.")
+            st.info("No visit records found.")
 
         # ---------------------------------------------------------
         # SECTION 3: MULTI-TAB EXCEL EXPORT WORKBOOK GENERATOR
@@ -168,7 +172,7 @@ if uploaded_file:
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # 1. Main Summary Sheet
+            # 1. Summary Sheet
             df_summary.to_excel(writer, sheet_name='Summary', index=False)
             
             workbook = writer.book
@@ -185,7 +189,7 @@ if uploaded_file:
             chart.set_title({'name': 'channel/actual visit'})
             worksheet_summary.insert_chart('G2', chart)
 
-            # Helper function to generate dynamic SKU analysis for Excel sheets
+            # Helper function for Excel tables
             def build_dynamic_sku_table(sub_df):
                 tot_visits = len(sub_df)
                 sku_records = []
