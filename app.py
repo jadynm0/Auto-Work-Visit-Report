@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
+import io
 
-# Page Configuration
 st.set_page_config(page_title="Market Visit Performance Report", page_icon="📊", layout="wide")
-
 st.title("📊 Monthly Market Visit Performance Report Generator")
 
 uploaded_file = st.file_uploader("Upload Excel File (.xlsx)", type=["xlsx"])
@@ -13,7 +12,7 @@ if uploaded_file:
     
     try:
         # ---------------------------------------------------------
-        # 1. READ TARGETS & FIX DATE CONVERSION BUG (7-11 -> 2026-07-11)
+        # 1. READ TARGETS & NORMALIZE CHANNEL NAMES
         # ---------------------------------------------------------
         df_targets = pd.read_excel(uploaded_file, sheet_name='Targets')
         df_targets.columns = [str(c).strip() for c in df_targets.columns]
@@ -23,12 +22,11 @@ if uploaded_file:
 
         df_targets = df_targets.dropna(subset=[ch_col, tg_col])
         
-        # CLEANING: Fix Excel auto-converting '7-11' into datetime objects
         cleaned_targets = {}
         for _, row in df_targets.iterrows():
             ch_raw = str(row[ch_col]).strip()
-            # If pandas read '7-11' as a date (e.g. '2026-07-11 00:00:00' or '07-11')
-            if '07-11' in ch_raw or '7-11' in ch_raw or '7/11' in ch_raw:
+            
+            if any(k in ch_raw for k in ['07-11', '7-11', '7/11', '2026-07-11']):
                 ch_name = '7-11'
             else:
                 ch_name = ch_raw
@@ -37,23 +35,109 @@ if uploaded_file:
                 target_val = int(float(row[tg_col]))
             except:
                 target_val = 0
+                
             cleaned_targets[ch_name] = target_val
 
         # ---------------------------------------------------------
-        # 2. READ SURVEY DATA & COUNT STORES
+        # 2. READ SURVEY DATA & COUNT STORES ACCURATELY
         # ---------------------------------------------------------
         df_raw = pd.read_excel(uploaded_file, sheet_name='表格回應 1')
         df_raw.columns = df_raw.iloc[0]
         df = df_raw.iloc[1:].reset_index(drop=True)
         
-        # Count actual store visits clean
-        store_counts = df['店鋪'].astype(str).str.strip().value_counts()
+        df['店鋪_clean'] = df['店鋪'].astype(str).str.strip()
+        store_counts = df['店鋪_clean'].value_counts()
+
+        # Build Summary Dataframe
+        summary_data = []
+        for channel, target in cleaned_targets.items():
+            if channel == '7-11':
+                actual = sum(count for store, count in store_counts.items() if any(k in store for k in ['7-11', '7/11', '07-11']))
+            elif channel == 'SMKT':
+                actual = store_counts.get('Wellcome', 0) + store_counts.get('ParkNshop', 0)
+            elif channel.lower() in ['min.chain', 'min chain']:
+                actual = store_counts.get('Aeon', 0) + store_counts.get("city'super", 0)
+            else:
+                actual = store_counts.get(channel, 0)
+
+            status = "Target Met 🟢" if actual >= target else "MISSED TARGET ❌"
+            summary_data.append({
+                "Channel": channel,
+                "Target Visit": target,
+                "Actual Visit": actual,
+                "Status": status
+            })
+
+        df_summary = pd.DataFrame(summary_data)
 
         # ---------------------------------------------------------
-        # 3. BUILD EXECUTIVE REPORT TEXT MATCHING GG'S SHEET
+        # 3. DISPLAY WEB DASHBOARD & PIE CHART
         # ---------------------------------------------------------
+        st.divider()
+        st.header("📌 Channel Visit Summary & Share")
+        
+        col_left, col_right = st.columns([1, 1])
+        
+        with col_left:
+            st.subheader("Visit Performance Summary")
+            st.dataframe(df_summary, use_container_width=True)
+            st.metric("Total Stores Audited", len(df))
+
+        with col_right:
+            st.subheader("channel/actual visit Share")
+            # Interactive Bar/Pie Chart on Web
+            chart_data = df_summary[df_summary['Actual Visit'] > 0].set_index("Channel")["Actual Visit"]
+            st.bar_chart(chart_data)
+
+        # ---------------------------------------------------------
+        # 4. GENERATE DOWNLOADABLE EXCEL WORKBOOK WITH EMBEDDED PIE CHART
+        # ---------------------------------------------------------
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # Write Summary Sheet
+            df_summary.to_excel(writer, sheet_name='Summary', index=False)
+            
+            workbook = writer.book
+            worksheet = writer.sheets['Summary']
+            
+            # Create Excel Pie Chart matching Gg's sheet
+            chart = workbook.add_chart({'type': 'pie'})
+            
+            # Configure chart series (Column C = Actual Visit, Column A = Channel)
+            max_row = len(df_summary) + 1
+            chart.add_series({
+                'name':       'channel/actual visit',
+                'categories': ['Summary', 1, 0, max_row - 1, 0],
+                'values':     ['Summary', 1, 2, max_row - 1, 2],
+                'data_labels': {'percentage': True},
+            })
+            
+            chart.set_title({'name': 'channel/actual visit'})
+            chart.set_style(10)
+            
+            # Insert chart onto Excel sheet next to data table
+            worksheet.insert_chart('F2', chart)
+
+        excel_data = output.getvalue()
+
+        # ---------------------------------------------------------
+        # 5. RENDER DOWNLOAD BUTTONS & TEXT SUMMARY
+        # ---------------------------------------------------------
+        st.divider()
+        st.header("📥 Download Options")
+        
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            st.download_button(
+                label="🟢 Download Excel Summary (.xlsx)",
+                data=excel_data,
+                file_name=f"Market_Visit_Summary_{uploaded_file.name}",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        # Text Summary Output
         districts = ", ".join(df['地區'].dropna().astype(str).str.strip().unique().tolist())
-
         report = f"""==================================================
 MONTHLY MARKET VISIT PERFORMANCE REPORT
 ==================================================
@@ -66,49 +150,11 @@ Processed File : {uploaded_file.name}
 
 [KPI Performance Tracking (Target vs Actual)]
 """
+        for _, row in df_summary.iterrows():
+            report += f"- {row['Channel']:<10}: Goal {row['Target Visit']:>3} stores | Actual: {row['Actual Visit']:>3} stores -> ({row['Status']})\n"
 
-        for channel, target in cleaned_targets.items():
-            actual = store_counts.get(channel, 0)
-            status = "Target Met 🟢" if actual >= target else "MISSED TARGET ❌"
-            report += f"- {channel:<10}: Goal {target:>3} stores | Actual: {actual:>3} stores -> ({status})\n"
-
-        # Function to generate SKU tables for specific channels
-        def analyze_channel_products(df_store, store_name):
-            if len(df_store) == 0:
-                return f"\n[{store_name} - Product Coverage Summary]\n  * No visit data recorded.\n"
-                
-            report_section = f"\n[{store_name} - Product Coverage Summary (Total Audited: {len(df_store)} stores)]\n"
-            cols = [c for c in df_store.columns if str(c).startswith('架上情況 [')]
-            
-            for col in cols:
-                clean_sku = col.replace('架上情況 [', '').replace(']', '').strip()
-                total_stores = len(df_store)
-                
-                col_str = df_store[col].astype(str)
-                in_stock = col_str.str.contains('有貨').sum()
-                oos = col_str.str.contains('缺貨').sum()
-                rate = (in_stock / total_stores) * 100 if total_stores > 0 else 0
-                
-                if in_stock > 0 or oos > 0:
-                    report_section += f"  * {clean_sku:<18} | On-Shelf: {in_stock:>2} | OOS: {oos:>2} | Coverage: {rate:>5.1f}%\n"
-            return report_section
-
-        # Generate breakdowns for 7-11 & Circle K
-        report += analyze_channel_products(df[df['店鋪'].astype(str).str.contains('7-11')], "7-11")
-        report += analyze_channel_products(df[df['店鋪'].astype(str).str.contains('Circle K')], "Circle K")
-
-        # ---------------------------------------------------------
-        # 4. RENDER IN STREAMLIT UI
-        # ---------------------------------------------------------
-        st.subheader("📋 Corrected Executive Report Summary")
-        st.text_area("Copyable Report Text", value=report, height=500)
-        
-        st.download_button(
-            label="💾 Download Report (.txt)",
-            data=report,
-            file_name=f"Market_Visit_Report_{uploaded_file.name.replace('.xlsx', '')}.txt",
-            mime="text/plain"
-        )
+        st.subheader("📋 Executive Text Summary")
+        st.text_area("Copyable Report Text", value=report, height=300)
 
     except Exception as e:
         st.error(f"❌ Error processing file: {e}")
