@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 import io
 
 st.set_page_config(page_title="Market Visit Performance Report", page_icon="📊", layout="wide")
@@ -39,7 +40,7 @@ if uploaded_file:
             cleaned_targets[ch_name] = target_val
 
         # ---------------------------------------------------------
-        # 2. READ SURVEY DATA & COUNT STORES ACCURATELY
+        # 2. READ SURVEY DATA & COUNT STORES
         # ---------------------------------------------------------
         df_raw = pd.read_excel(uploaded_file, sheet_name='表格回應 1')
         df_raw.columns = df_raw.iloc[0]
@@ -48,7 +49,6 @@ if uploaded_file:
         df['店鋪_clean'] = df['店鋪'].astype(str).str.strip()
         store_counts = df['店鋪_clean'].value_counts()
 
-        # Build Summary Dataframe
         summary_data = []
         for channel, target in cleaned_targets.items():
             if channel == '7-11':
@@ -71,7 +71,7 @@ if uploaded_file:
         df_summary = pd.DataFrame(summary_data)
 
         # ---------------------------------------------------------
-        # 3. DISPLAY WEB DASHBOARD & PIE CHART
+        # 3. DISPLAY WEB DASHBOARD WITH EXACT PIE/DONUT CHART
         # ---------------------------------------------------------
         st.divider()
         st.header("📌 Channel Visit Summary & Share")
@@ -85,25 +85,42 @@ if uploaded_file:
 
         with col_right:
             st.subheader("channel/actual visit Share")
-            # Interactive Bar/Pie Chart on Web
-            chart_data = df_summary[df_summary['Actual Visit'] > 0].set_index("Channel")["Actual Visit"]
-            st.bar_chart(chart_data)
+            
+            # Filter for non-zero visits
+            chart_df = df_summary[df_summary['Actual Visit'] > 0]
+            
+            if not chart_df.empty:
+                # Render Pie Chart matching Gg's sheet layout
+                fig, ax = plt.subplots(figsize=(6, 6))
+                
+                # Make figure background transparent to blend with Streamlit theme
+                fig.patch.set_alpha(0.0)
+                
+                wedges, texts, autotexts = ax.pie(
+                    chart_df['Actual Visit'], 
+                    labels=chart_df['Channel'], 
+                    autopct='%1.1f%%',
+                    startangle=140,
+                    textprops=dict(color="white"),
+                    wedgeprops=dict(width=0.4, edgecolor='none') # Donut shape
+                )
+                
+                plt.setp(autotexts, size=10, weight="bold")
+                ax.axis('equal')
+                
+                st.pyplot(fig)
 
         # ---------------------------------------------------------
-        # 4. GENERATE DOWNLOADABLE EXCEL WORKBOOK WITH EMBEDDED PIE CHART
+        # 4. GENERATE DOWNLOADABLE EXCEL WORKBOOK
         # ---------------------------------------------------------
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Write Summary Sheet
             df_summary.to_excel(writer, sheet_name='Summary', index=False)
             
             workbook = writer.book
             worksheet = writer.sheets['Summary']
             
-            # Create Excel Pie Chart matching Gg's sheet
-            chart = workbook.add_chart({'type': 'pie'})
-            
-            # Configure chart series (Column C = Actual Visit, Column A = Channel)
+            chart = workbook.add_chart({'type': 'doughnut'})
             max_row = len(df_summary) + 1
             chart.add_series({
                 'name':       'channel/actual visit',
@@ -114,8 +131,6 @@ if uploaded_file:
             
             chart.set_title({'name': 'channel/actual visit'})
             chart.set_style(10)
-            
-            # Insert chart onto Excel sheet next to data table
             worksheet.insert_chart('F2', chart)
 
         excel_data = output.getvalue()
@@ -126,17 +141,13 @@ if uploaded_file:
         st.divider()
         st.header("📥 Download Options")
         
-        col_btn1, col_btn2 = st.columns(2)
-        
-        with col_btn1:
-            st.download_button(
-                label="🟢 Download Excel Summary (.xlsx)",
-                data=excel_data,
-                file_name=f"Market_Visit_Summary_{uploaded_file.name}",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        st.download_button(
+            label="🟢 Download Excel Summary (.xlsx)",
+            data=excel_data,
+            file_name=f"Market_Visit_Summary_{uploaded_file.name}",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
-        # Text Summary Output
         districts = ", ".join(df['地區'].dropna().astype(str).str.strip().unique().tolist())
         report = f"""==================================================
 MONTHLY MARKET VISIT PERFORMANCE REPORT
