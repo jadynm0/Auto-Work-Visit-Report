@@ -7,7 +7,7 @@ import io
 st.set_page_config(page_title="Market Visit Summary Dashboard", page_icon="📊", layout="wide")
 st.title("📊 Monthly Market Visit Performance Dashboard")
 
-# Dual File Uploaders
+# File Uploaders
 col_up1, col_up2 = st.columns(2)
 with col_up1:
     uploaded_file = st.file_uploader("1. Upload Market Visit Survey File (.xlsx)", type=["xlsx"])
@@ -30,10 +30,10 @@ def normalize_district(d_str):
     }
     return mapping.get(d_str, d_str)
 
-if uploaded_file:
-    st.success("Survey file uploaded successfully!")
-    
+if uploaded_file is not None:
     try:
+        st.success("Survey file loaded successfully!")
+        
         # ---------------------------------------------------------
         # 1. READ RAW SURVEY DATA
         # ---------------------------------------------------------
@@ -58,21 +58,21 @@ if uploaded_file:
         # 2. READ PRODUCT LISTING (DEAL STATUS) IF PROVIDED
         # ---------------------------------------------------------
         product_listing_deals = {}
-        if uploaded_pl:
+        if uploaded_pl is not None:
             try:
                 df_pl = pd.read_excel(uploaded_pl, sheet_name=0)
-                # Parse clients and SKUs from product listing sheet
                 clients = [str(c).strip() for c in df_pl.iloc[3, 2:].values if pd.notnull(c)]
                 for r_idx in range(4, len(df_pl)):
                     sku_name = str(df_pl.iloc[r_idx, 1]).strip()
                     if sku_name and sku_name != 'nan':
                         for c_idx, client in enumerate(clients):
-                            has_deal = str(df_pl.iloc[r_idx, c_idx + 2]).strip().upper() == 'P'
-                            if client not in product_listing_deals:
-                                product_listing_deals[client] = {}
-                            product_listing_deals[client][sku_name] = has_deal
-            except Exception as e:
-                st.info("Product listing uploaded but dynamic structure varied. Using survey defaults.")
+                            if (c_idx + 2) < len(df_pl.columns):
+                                val = str(df_pl.iloc[r_idx, c_idx + 2]).strip().upper()
+                                if client not in product_listing_deals:
+                                    product_listing_deals[client] = {}
+                                product_listing_deals[client][sku_name] = (val == 'P')
+            except Exception as pl_err:
+                st.info("Uploaded Product Listing formatted differently; continuing with survey defaults.")
 
         # ---------------------------------------------------------
         # 3. READ TARGETS DYNAMICALLY
@@ -89,14 +89,20 @@ if uploaded_file:
             for _, row in df_targets.dropna(subset=[ch_col]).iterrows():
                 ch_raw = str(row[ch_col]).strip()
                 ch_name = '7-11' if any(k in ch_raw for k in ['07-11', '7-11', '7/11', '2026-07-11']) else ch_raw
-                targets_dict[ch_name] = int(float(row[tg_col])) if pd.notnull(row[tg_col]) else 0
+                try:
+                    targets_dict[ch_name] = int(float(row[tg_col]))
+                except:
+                    targets_dict[ch_name] = 0
                 if hk_col and pd.notnull(row[hk_col]):
-                    total_shops_dict[ch_name] = int(float(row[hk_col]))
+                    try:
+                        total_shops_dict[ch_name] = int(float(row[hk_col]))
+                    except:
+                        pass
         except Exception:
             pass
 
         # ---------------------------------------------------------
-        # 4. DISTRICT COVERAGE ANALYSIS (X/18 DISTRICTS)
+        # 4. DISTRICT COVERAGE ANALYSIS
         # ---------------------------------------------------------
         visited_districts = [d for d in df['地區_clean'].unique() if d in HK_18_DISTRICTS]
         district_count = len(visited_districts)
@@ -123,13 +129,11 @@ if uploaded_file:
                 "Total Shop in HK": tot_shops,
                 "Target Visit": tg_val,
                 "Actual Visit": actual_visits,
-                "Status": "Target Met 🟢" if actual_visits >= tg_val and tg_val > 0 else "MISSED TARGET ❌"
+                "Status": "Target Met 🟢" if actual_visits >= tg_val and tg_val > 0 else ("No Target Set ⚪" if tg_val == 0 else "MISSED TARGET ❌")
             }
 
-            # Add counts per salesperson column
             for sp in salespeople:
-                sp_count = (sub_df['姓名_clean'] == sp).sum()
-                row_data[sp] = sp_count
+                row_data[sp] = (sub_df['姓名_clean'] == sp).sum()
 
             summary_rows.append(row_data)
 
@@ -154,9 +158,10 @@ if uploaded_file:
         with col2:
             st.subheader("channel/actual visit Share")
             chart_df = df_summary[df_summary['Actual Visit'] > 0]
-            fig = px.pie(chart_df, values='Actual Visit', names='Channel', hole=0.5, color_discrete_sequence=px.colors.qualitative.Set2)
-            fig.update_traces(textinfo='percent+label', textposition='outside')
-            st.plotly_chart(fig, use_container_width=True)
+            if len(chart_df) > 0:
+                fig = px.pie(chart_df, values='Actual Visit', names='Channel', hole=0.5, color_discrete_sequence=px.colors.qualitative.Set2)
+                fig.update_traces(textinfo='percent+label', textposition='outside')
+                st.plotly_chart(fig, use_container_width=True)
 
         # ---------------------------------------------------------
         # DASHBOARD SECTION 2: INTERACTIVE CHANNEL / OVERALL ANALYSIS
@@ -202,7 +207,6 @@ if uploaded_file:
                 no_tag = col_s.str.contains('無貨').sum()
                 cov = round((has_stock / tot_v) * 100, 1)
                 
-                # Check deal status from product listing
                 has_deal = product_listing_deals.get(selected_ch, {}).get(clean_name, None)
                 deal_note = "With Deal (有deal)" if has_deal is True else ("No Deal" if has_deal is False else "N/A")
                 if cov == 0 and has_deal is False:
@@ -219,7 +223,7 @@ if uploaded_file:
             st.dataframe(pd.DataFrame(sku_details), use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 3: MULTI-TAB BEAUTIFIED EXCEL EXPORT
+        # SECTION 3: MULTI-TAB EXCEL EXPORT
         # ---------------------------------------------------------
         st.divider()
         st.header("📥 Download Complete Formatted Excel Report")
@@ -292,3 +296,5 @@ if uploaded_file:
 
     except Exception as e:
         st.error(f"❌ Error processing file: {e}")
+else:
+    st.info("👆 Please upload the Market Visit Survey file (.xlsx) above to generate the dashboard.")
