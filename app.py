@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import xlsxwriter
 import re
 import io
 
@@ -14,7 +15,7 @@ with col_up1:
 with col_up2:
     uploaded_pl = st.file_uploader("2. Upload Product Listing File (.xlsx) [Optional]", type=["xlsx"])
 
-# Official HK 18 Administrative Districts
+# Official HK 18 Administrative Districts (Static Benchmark allowed)
 HK_18_DISTRICTS = [
     '中西區', '東區', '南區', '灣仔區', '九龍城', '觀塘', '深水埗', '黃大仙', '油尖旺',
     '離島', '葵青', '北區', '西貢', '沙田', '大埔', '荃灣', '屯門', '元朗'
@@ -45,7 +46,7 @@ if uploaded_file is not None:
     
     try:
         # ---------------------------------------------------------
-        # 1. READ RAW SURVEY DATA DYNAMICALLY
+        # 1. READ RAW SURVEY DATA DYNAMICALLY (PURE SOURCE OF TRUTH)
         # ---------------------------------------------------------
         df_raw = pd.read_excel(uploaded_file, sheet_name='表格回應 1')
         df_raw.columns = [str(c).strip() for c in df_raw.iloc[0]]
@@ -65,7 +66,7 @@ if uploaded_file is not None:
         sku_mapping = {col: clean_sku_name(col) for col in sku_cols}
 
         # ---------------------------------------------------------
-        # 2. READ PRODUCT LISTING (DEAL STATUS) IF PROVIDED
+        # 2. READ PRODUCT LISTING (DEAL STATUS) DYNAMICALLY IF PROVIDED
         # ---------------------------------------------------------
         product_listing_deals = {}
         if uploaded_pl is not None:
@@ -107,7 +108,7 @@ if uploaded_file is not None:
                     try:
                         total_shops_dict[ch_name] = int(float(row[hk_col]))
                     except:
-                        pass
+                        total_shops_dict[ch_name] = 0
         except Exception:
             st.info("Targets sheet not detected or using dynamic store counts.")
 
@@ -118,8 +119,9 @@ if uploaded_file is not None:
         district_count = len(visited_districts)
 
         # ---------------------------------------------------------
-        # 5. BUILD SUMMARY WITH SALESPERSON BREAKDOWN + BOTTOM TOTAL
+        # 5. DYNAMIC SALESPERSON & CHANNEL BREAKDOWN
         # ---------------------------------------------------------
+        # Dynamically pull salespeople from survey
         salespeople = [s for s in df['姓名_clean'].unique() if s and s != 'nan']
         raw_channels = df['店鋪_clean'].unique().tolist()
         
@@ -165,15 +167,19 @@ if uploaded_file is not None:
         df_summary = pd.DataFrame(summary_rows)
 
         # ---------------------------------------------------------
-        # SECTION 1: OVERALL KPI DASHBOARD & DISTRICT TRACKER
+        # SECTION 1: OVERALL KPI DASHBOARD
         # ---------------------------------------------------------
         st.divider()
         st.header("📌 Overall Market Visit Summary")
         
-        m_col1, m_col2, m_col3 = st.columns(3)
+        m_col1, m_col2 = st.columns([1, 2])
         m_col1.metric("Total Stores Audited", len(df))
-        m_col2.metric("HK District Coverage", f"{district_count}/18 Districts")
-        m_col3.metric("Audited Districts", ", ".join(visited_districts[:6]) + ("..." if len(visited_districts) > 6 else ""))
+        m_col2.metric("HK District Coverage", f"{district_count}/18 Administrative Districts Visited")
+
+        # Expander showing all visited districts cleanly
+        with st.expander(f"📍 View All {district_count} Visited Districts in Hong Kong", expanded=True):
+            district_tags = " • ".join([f"**{d}** 🟢" for d in visited_districts])
+            st.markdown(district_tags)
 
         col1, col2 = st.columns([1.4, 1])
         with col1:
@@ -229,7 +235,7 @@ if uploaded_file is not None:
             ])
             st.dataframe(df_choice, use_container_width=True)
 
-            # DETAILED SKU SHELF STATUS TABLE WITH BENCHMARK RATING
+            # DETAILED SKU SHELF STATUS TABLE
             st.subheader(f"🛒 {selected_ch} - Detailed SKU Shelf Status & Performance")
             sku_details = []
             for orig_col, clean_name in sku_mapping.items():
@@ -259,7 +265,7 @@ if uploaded_file is not None:
             st.info("No visit records found.")
 
         # ---------------------------------------------------------
-        # SECTION 3: MULTI-TAB EXCEL EXPORT WORKBOOK GENERATOR
+        # SECTION 3: MULTI-TAB EXCEL EXPORT WITH DYNAMIC CHART POSITION
         # ---------------------------------------------------------
         st.divider()
         st.header("📥 Download Complete Formatted Excel Summary")
@@ -280,6 +286,11 @@ if uploaded_file is not None:
                 ws_summary.set_column(col_idx, col_idx, max(max_len, 12), cell_fmt)
                 ws_summary.write(0, col_idx, col, header_fmt)
 
+            # DYNAMIC CHART POSITIONING: Insert chart 2 columns to the right of the summary table
+            chart_col_idx = len(df_summary.columns) + 1
+            chart_col_letter = xlsxwriter.utility.xl_col_to_name(chart_col_idx)
+            chart_cell = f"{chart_col_letter}2"
+
             chart = workbook.add_chart({'type': 'doughnut'})
             max_row = len(df_summary)
             chart.add_series({
@@ -289,13 +300,13 @@ if uploaded_file is not None:
                 'data_labels': {'percentage': True},
             })
             chart.set_title({'name': 'channel/actual visit'})
-            ws_summary.insert_chart('K2', chart)
+            ws_summary.insert_chart(chart_cell, chart)
 
             # 2. District Breakdown Sheet
             df_dist = pd.DataFrame([{"Audited District": d, "Status": "Visited 🟢"} for d in visited_districts])
             df_dist.to_excel(writer, sheet_name='District Coverage', index=False)
 
-            # Helper function for Excel tables
+            # Helper function for SKU tabs
             def export_detailed_channel_sheet(sub_df, sheet_name):
                 tot_visits = len(sub_df)
                 if tot_visits == 0:
