@@ -15,11 +15,28 @@ with col_up1:
 with col_up2:
     uploaded_pl = st.file_uploader("2. Upload Product Listing File (.xlsx) [Optional]", type=["xlsx"])
 
-# Official HK 18 Administrative Districts (Static Benchmark allowed)
+# 1. Official HK 18 Administrative Districts
 HK_18_DISTRICTS = [
     '中西區', '東區', '南區', '灣仔區', '九龍城', '觀塘', '深水埗', '黃大仙', '油尖旺',
     '離島', '葵青', '北區', '西貢', '沙田', '大埔', '荃灣', '屯門', '元朗'
 ]
+
+# 2. HK Retail Chain Name Mappings (English <-> Chinese)
+CLIENT_NAME_MAP = {
+    'Wellcome': ['Wellcome', '惠康'],
+    'ParkNshop': ['ParkNshop', 'ParknShop', '百佳'],
+    '7-11': ['7-11', '7/11', '07-11', '2026-07-11'],
+    'Circle K': ['Circle K', 'OK'],
+    '佳寶': ['佳寶'],
+    'Aeon': ['Aeon', 'AEON'],
+    "city'super": ["city'super", "City Super", "City\nSuper", "CitySuper"]
+}
+
+# 3. HK Retail Chain Total Store Benchmarks
+DEFAULT_HK_SHOPS = {
+    'Wellcome': 300, 'ParkNshop': 200, '7-11': 900, 'Circle K': 300,
+    '佳寶': 100, 'Aeon': 12, "city'super": 6, 'CitiStore': 5, '永安': 3, 'UNY': 3
+}
 
 def normalize_district(d_str):
     d_str = str(d_str).strip()
@@ -30,6 +47,14 @@ def normalize_district(d_str):
         '天水圍': '元朗', '黃竹坑': '南區'
     }
     return mapping.get(d_str, d_str)
+
+def normalize_salesperson(sp_str):
+    s = str(sp_str).strip()
+    if s.lower() in ['chris wong', 'chriswong']:
+        return 'Chris Wong'
+    if s.lower() in ['eunice chu', 'eunice', 'eunicfg']:
+        return 'Eunice Chu'
+    return s
 
 def get_coverage_rating(cov_num):
     if cov_num >= 85:
@@ -42,21 +67,21 @@ def get_coverage_rating(cov_num):
         return "Below Benchmark 🔴"
 
 if uploaded_file is not None:
-    st.success("File uploaded successfully! Processing summary...")
+    st.toast("File uploaded successfully! Processing summary...", icon="✅")
     
     try:
         # ---------------------------------------------------------
-        # 1. READ RAW SURVEY DATA DYNAMICALLY (PURE SOURCE OF TRUTH)
+        # 1. READ RAW SURVEY DATA
         # ---------------------------------------------------------
         df_raw = pd.read_excel(uploaded_file, sheet_name='表格回應 1')
         df_raw.columns = [str(c).strip() for c in df_raw.iloc[0]]
         df = df_raw.iloc[1:].reset_index(drop=True)
         
         df['店鋪_clean'] = df['店鋪'].astype(str).str.strip()
-        df['姓名_clean'] = df['姓名'].astype(str).str.strip()
+        df['姓名_clean'] = df['姓名'].apply(normalize_salesperson)
         df['地區_clean'] = df['地區'].apply(normalize_district)
 
-        # Extract ALL product columns dynamically
+        # Extract ALL SKUs dynamically
         sku_cols = [c for c in df.columns if '架上情況 [' in str(c)]
         
         def clean_sku_name(col_name):
@@ -66,22 +91,32 @@ if uploaded_file is not None:
         sku_mapping = {col: clean_sku_name(col) for col in sku_cols}
 
         # ---------------------------------------------------------
-        # 2. READ PRODUCT LISTING (DEAL STATUS) DYNAMICALLY IF PROVIDED
+        # 2. READ PRODUCT LISTING DEALS WITH CLIENT MAP
         # ---------------------------------------------------------
         product_listing_deals = {}
         if uploaded_pl is not None:
             try:
                 df_pl = pd.read_excel(uploaded_pl, sheet_name=0)
-                clients = [str(c).strip() for c in df_pl.iloc[3, 2:].values if pd.notnull(c)]
+                clients_raw = [str(c).replace('\n', ' ').strip() for c in df_pl.iloc[3, 2:].values if pd.notnull(c)]
+                
                 for r_idx in range(4, len(df_pl)):
                     sku_name = str(df_pl.iloc[r_idx, 1]).strip()
                     if sku_name and sku_name != 'nan':
-                        for c_idx, client in enumerate(clients):
+                        for c_idx, raw_client in enumerate(clients_raw):
                             if (c_idx + 2) < len(df_pl.columns):
                                 val = str(df_pl.iloc[r_idx, c_idx + 2]).strip().upper()
-                                if client not in product_listing_deals:
-                                    product_listing_deals[client] = {}
-                                product_listing_deals[client][sku_name] = (val == 'P')
+                                has_p = (val == 'P')
+                                
+                                # Map raw client to standardized channel name
+                                std_channel = raw_client
+                                for std_ch, aliases in CLIENT_NAME_MAP.items():
+                                    if any(a.lower() in raw_client.lower() or raw_client.lower() in a.lower() for a in aliases):
+                                        std_channel = std_ch
+                                        break
+                                
+                                if std_channel not in product_listing_deals:
+                                    product_listing_deals[std_channel] = {}
+                                product_listing_deals[std_channel][sku_name] = has_p
             except Exception:
                 st.info("Product listing structure varied; continuing with survey defaults.")
 
@@ -108,9 +143,9 @@ if uploaded_file is not None:
                     try:
                         total_shops_dict[ch_name] = int(float(row[hk_col]))
                     except:
-                        total_shops_dict[ch_name] = 0
+                        pass
         except Exception:
-            st.info("Targets sheet not detected or using dynamic store counts.")
+            pass
 
         # ---------------------------------------------------------
         # 4. DISTRICT COVERAGE TRACKER (X/18 DISTRICTS)
@@ -119,9 +154,8 @@ if uploaded_file is not None:
         district_count = len(visited_districts)
 
         # ---------------------------------------------------------
-        # 5. DYNAMIC SALESPERSON & CHANNEL BREAKDOWN
+        # 5. SALESPERSON & CHANNEL BREAKDOWN
         # ---------------------------------------------------------
-        # Dynamically pull salespeople from survey
         salespeople = [s for s in df['姓名_clean'].unique() if s and s != 'nan']
         raw_channels = df['店鋪_clean'].unique().tolist()
         
@@ -134,7 +168,7 @@ if uploaded_file is not None:
         summary_rows = []
         for ch_name, actual_count in consolidated_counts.items():
             tg_val = targets_dict.get(ch_name, 0)
-            tot_shops = total_shops_dict.get(ch_name, 0)
+            tot_shops = total_shops_dict.get(ch_name, DEFAULT_HK_SHOPS.get(ch_name, 0))
             status = "Target Met 🟢" if actual_count >= tg_val and tg_val > 0 else ("No Target Set ⚪" if tg_val == 0 else "MISSED TARGET ❌")
             
             sub_df = df[df['店鋪_clean'].str.contains(ch_name, regex=False, na=False)]
@@ -155,7 +189,7 @@ if uploaded_file is not None:
         # Add Bottom Total Row
         total_row = {
             "Channel": "Total",
-            "Total Shop in HK": sum(r["Total Shop in HK"] for r in summary_rows),
+            "Total Shop in HK": sum(r["Total Shop in HK"] for r in summary_rows if isinstance(r["Total Shop in HK"], int)),
             "Target Visit": sum(r["Target Visit"] for r in summary_rows),
             "Actual Visit": sum(r["Actual Visit"] for r in summary_rows),
             "Status": "Total Summary"
@@ -176,7 +210,6 @@ if uploaded_file is not None:
         m_col1.metric("Total Stores Audited", len(df))
         m_col2.metric("HK District Coverage", f"{district_count}/18 Administrative Districts Visited")
 
-        # Expander showing all visited districts cleanly
         with st.expander(f"📍 View All {district_count} Visited Districts in Hong Kong", expanded=True):
             district_tags = " • ".join([f"**{d}** 🟢" for d in visited_districts])
             st.markdown(district_tags)
@@ -238,6 +271,10 @@ if uploaded_file is not None:
             # DETAILED SKU SHELF STATUS TABLE
             st.subheader(f"🛒 {selected_ch} - Detailed SKU Shelf Status & Performance")
             sku_details = []
+            
+            # Lookup deal status using CLIENT_NAME_MAP match
+            matched_deals = product_listing_deals.get(selected_ch, {})
+
             for orig_col, clean_name in sku_mapping.items():
                 col_s = df_ch[orig_col].astype(str)
                 
@@ -246,7 +283,7 @@ if uploaded_file is not None:
                 no_tag = col_s.str.contains('無貨').sum()
                 cov = round((has_stock / tot_v) * 100, 1)
                 
-                has_deal = product_listing_deals.get(selected_ch, {}).get(clean_name, None)
+                has_deal = matched_deals.get(clean_name, None)
                 deal_note = "With Deal" if has_deal is True else ("No Deal" if has_deal is False else "-")
                 if cov == 0 and has_deal is False:
                     deal_note = "0% due to No Deal (無Deal未上架)"
@@ -265,7 +302,7 @@ if uploaded_file is not None:
             st.info("No visit records found.")
 
         # ---------------------------------------------------------
-        # SECTION 3: MULTI-TAB EXCEL EXPORT WITH DYNAMIC CHART POSITION
+        # SECTION 3: MULTI-TAB EXCEL EXPORT WORKBOOK GENERATOR
         # ---------------------------------------------------------
         st.divider()
         st.header("📥 Download Complete Formatted Excel Summary")
@@ -286,7 +323,7 @@ if uploaded_file is not None:
                 ws_summary.set_column(col_idx, col_idx, max(max_len, 12), cell_fmt)
                 ws_summary.write(0, col_idx, col, header_fmt)
 
-            # DYNAMIC CHART POSITIONING: Insert chart 2 columns to the right of the summary table
+            # DYNAMIC CHART POSITIONING: 2 columns to the right of summary table
             chart_col_idx = len(df_summary.columns) + 1
             chart_col_letter = xlsxwriter.utility.xl_col_to_name(chart_col_idx)
             chart_cell = f"{chart_col_letter}2"
@@ -325,6 +362,8 @@ if uploaded_file is not None:
                     {"Choice Coverage Range": ">9 SKUs", "Store Count": c_gt_9, "Share (%)": f"{round((c_gt_9/tot_visits)*100, 1)}%"},
                 ])
 
+                matched_deals = product_listing_deals.get(sheet_name, {})
+
                 sku_records = []
                 for orig_col, clean_name in sku_mapping.items():
                     col_series = sub_df[orig_col].astype(str)
@@ -333,7 +372,7 @@ if uploaded_file is not None:
                     no_tag = col_series.str.contains('無貨').sum()
                     cov = round((has_stock / tot_visits) * 100, 1) if tot_visits > 0 else 0
                     
-                    has_deal = product_listing_deals.get(sheet_name, {}).get(clean_name, None)
+                    has_deal = matched_deals.get(clean_name, None)
                     deal_note = "With Deal" if has_deal is True else ("No Deal" if has_deal is False else "-")
 
                     sku_records.append({
