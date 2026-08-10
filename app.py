@@ -15,13 +15,13 @@ with col_up1:
 with col_up2:
     uploaded_pl = st.file_uploader("2. Upload Product Listing File (.xlsx) [Optional]", type=["xlsx"])
 
-# Official HK 18 Administrative Districts
+# 1. Official HK 18 Administrative Districts
 HK_18_DISTRICTS = [
     '中西區', '東區', '南區', '灣仔區', '九龍城', '觀塘', '深水埗', '黃大仙', '油尖旺',
     '離島', '葵青', '北區', '西貢', '沙田', '大埔', '荃灣', '屯門', '元朗'
 ]
 
-# Client Name Mapping for Bilingual Channel Names
+# 2. HK Retail Chain Name Mappings (English <-> Chinese)
 CLIENT_NAME_MAP = {
     'Wellcome': ['Wellcome', '惠康'],
     'ParkNshop': ['ParkNshop', 'ParknShop', '百佳'],
@@ -30,6 +30,16 @@ CLIENT_NAME_MAP = {
     '佳寶': ['佳寶'],
     'Aeon': ['Aeon', 'AEON'],
     "city'super": ["city'super", "City Super", "City\nSuper", "CitySuper"]
+}
+
+# 3. Product SKU Name Cross-Reference (Short Survey Names <-> Official Catalog Names)
+SKU_NAME_MAP = {
+    '310ml楊枝甘露(常溫)': ['常溫楊枝甘露310ml', '芒果椰果柚子甘露310ml'],
+    '蘆楊': ['蘆薈楊枝甘露', '蘆薈楊枝甘露450ml'],
+    '紫米露': ['椰香紫米甘露', '椰香紫米甘露 330g'],
+    '爆檸蜜': ['凍檸蜜'],
+    '花膠冰糖雪耳甘露飲品': ['花膠雪耳冰糖甘露', '花膠雪耳冰糖甘露330g'],
+    '杏仁露': ['杏仁露 330ml']
 }
 
 def normalize_district(d_str):
@@ -66,10 +76,16 @@ def match_sku_deal(survey_sku, client_deals_dict):
     
     clean_s = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', str(survey_sku)).lower()
     
+    # Check explicit SKU alias map first
+    aliases = SKU_NAME_MAP.get(survey_sku, [survey_sku])
+    
     for pl_sku, has_p in client_deals_dict.items():
         clean_p = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', str(pl_sku)).lower()
+        if any(re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', a).lower() in clean_p for a in aliases):
+            return has_p
         if clean_s == clean_p or clean_s in clean_p or clean_p in clean_s:
             return has_p
+            
     return None
 
 if uploaded_file is not None:
@@ -97,7 +113,7 @@ if uploaded_file is not None:
         sku_mapping = {col: clean_sku_name(col) for col in sku_cols}
 
         # ---------------------------------------------------------
-        # 2. READ PRODUCT LISTING DEALS DYNAMICALLY
+        # 2. READ PRODUCT LISTING DEALS WITH MAPS
         # ---------------------------------------------------------
         product_listing_deals = {}
         if uploaded_pl is not None:
@@ -131,7 +147,6 @@ if uploaded_file is not None:
         targets_dict = {}
         total_shops_dict = {}
         
-        # Check if user file has 'summary' tab or 'Targets' sheet for total shop counts
         try:
             excel_obj = pd.ExcelFile(uploaded_file)
             if 'summary' in excel_obj.sheet_names:
@@ -255,7 +270,7 @@ if uploaded_file is not None:
                 st.plotly_chart(fig, use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 2: INTERACTIVE "BY CHANNEL" OR "ALL STORES (OVERALL)"
+        # SECTION 2: INTERACTIVE ANALYSIS
         # ---------------------------------------------------------
         st.divider()
         st.header("🔍 Interactive Analysis (Channel or Overall)")
@@ -295,7 +310,7 @@ if uploaded_file is not None:
             ])
             st.dataframe(df_choice, use_container_width=True)
 
-            # DETAILED SKU SHELF STATUS TABLE WITH STRICT DEAL LOGIC
+            # DETAILED SKU SHELF STATUS TABLE
             st.subheader(f"🛒 {selected_ch} - Detailed SKU Shelf Status & Performance")
             sku_details = []
             
@@ -309,7 +324,6 @@ if uploaded_file is not None:
                 no_tag = col_s.str.contains('無貨').sum()
                 cov = round((has_stock / tot_v) * 100, 1)
                 
-                # Strict Deal Logic
                 if selected_ch == "All Stores (Overall)":
                     deal_note = "Aggregated Overall"
                 else:
