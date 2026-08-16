@@ -291,10 +291,10 @@ if uploaded_file is not None:
                     "Audit Count (走訪分店數)": v_count
                 })
 
-        df_dist_summary = pd.DataFrame(district_summary_rows)
+        df_dist_summary = pd.DataFrame(district_summary_rows).fillna('N/A')
 
-        # 5. DYNAMIC CHANNEL & SALESPERSON TABLE
-        salespeople = [s for s in df['姓名_clean'].unique() if s and s != 'nan']
+        # 5. DYNAMIC CHANNEL & SALESPERSON TABLE (SANITIZED COLUMN NAMES)
+        salespeople = [str(s).strip() for s in df['姓名_clean'].unique() if pd.notnull(s) and str(s).strip().lower() not in ['nan', 'none', '']]
         visited_channels = df['店鋪_clean'].unique().tolist()
         all_channels = list(dict.fromkeys(visited_channels + list(targets_dict.keys())))
 
@@ -343,7 +343,9 @@ if uploaded_file is not None:
             total_row[sp] = sum(r[sp] for r in summary_rows)
             
         summary_rows.append(total_row)
-        df_summary = pd.DataFrame(summary_rows)
+        
+        # Clean all NaNs to prevent Streamlit frontend JSON parse errors
+        df_summary = pd.DataFrame(summary_rows).fillna('N/A')
 
         ai_generated_text = generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mapping)
 
@@ -369,7 +371,7 @@ if uploaded_file is not None:
 
             with col2:
                 st.subheader("channel/actual visit Share")
-                chart_df = df_summary[(df_summary['Channel'] != 'Total') & (df_summary['Actual Visit'] > 0)]
+                chart_df = df_summary[(df_summary['Channel'] != 'Total') & (pd.to_numeric(df_summary['Actual Visit'], errors='coerce') > 0)]
                 if len(chart_df) > 0:
                     fig = px.pie(chart_df, values='Actual Visit', names='Channel', hole=0.5, color_discrete_sequence=px.colors.qualitative.Set2)
                     fig.update_traces(textinfo='percent+label', textposition='outside')
@@ -378,7 +380,8 @@ if uploaded_file is not None:
             st.divider()
             st.header("🔍 Interactive Channel Analysis & Visual Stock Breakdown")
             
-            channel_options = ["All Stores (Overall)"] + [c for c in df_summary['Channel'].tolist() if c != 'Total' and df_summary.loc[df_summary['Channel']==c, 'Actual Visit'].values[0] > 0]
+            valid_channels = [c for c in df_summary['Channel'].tolist() if c != 'Total' and int(df_summary.loc[df_summary['Channel']==c, 'Actual Visit'].values[0]) > 0]
+            channel_options = ["All Stores (Overall)"] + valid_channels
             selected_ch = st.selectbox("Select View:", options=channel_options)
 
             if selected_ch == "All Stores (Overall)":
@@ -401,7 +404,7 @@ if uploaded_file is not None:
                 {"Choice Coverage Range": "1-4 SKUs", "Store Count": c_1_4, "Share (%)": f"{round((c_1_4/tot_v)*100, 1)}%"},
                 {"Choice Coverage Range": "5-9 SKUs", "Store Count": c_5_9, "Share (%)": f"{round((c_5_9/tot_v)*100, 1)}%"},
                 {"Choice Coverage Range": ">9 SKUs", "Store Count": c_gt_9, "Share (%)": f"{round((c_gt_9/tot_v)*100, 1)}%"},
-            ])
+            ]).fillna('N/A')
             st.dataframe(df_choice, use_container_width=True)
 
             # SKU Shelf Table & Chart
@@ -441,7 +444,7 @@ if uploaded_file is not None:
                     "Performance Rating": get_coverage_rating(cov)
                 })
             
-            df_sku_view = pd.DataFrame(sku_details)
+            df_sku_view = pd.DataFrame(sku_details).fillna('N/A')
             st.dataframe(df_sku_view, use_container_width=True)
 
             if selected_ch != "All Stores (Overall)":
@@ -460,7 +463,7 @@ if uploaded_file is not None:
             st.markdown(ai_generated_text)
 
         # ---------------------------------------------------------
-        # SECTION 3: MULTI-TAB EXCEL EXPORT WORKBOOK (WITH NAN/INF FIX)
+        # SECTION 3: MULTI-TAB EXCEL EXPORT WORKBOOK
         # ---------------------------------------------------------
         st.divider()
         st.header("📥 Download Complete Formatted Excel Report")
@@ -474,19 +477,18 @@ if uploaded_file is not None:
             ai_title_fmt = workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#1F497D'})
             ai_text_fmt = workbook.add_format({'text_wrap': True, 'font_size': 11})
 
-            # 1. Summary Sheet (Fill NaN to prevent write_number error)
-            df_summary_clean = df_summary.fillna('N/A')
-            df_summary_clean.to_excel(writer, sheet_name='Summary', index=False)
+            # 1. Summary Sheet
+            df_summary.to_excel(writer, sheet_name='Summary', index=False)
             ws_summary = writer.sheets['Summary']
-            for col_idx, col in enumerate(df_summary_clean.columns):
-                max_len = max(df_summary_clean[col].astype(str).map(len).max(), len(str(col))) + 5
+            for col_idx, col in enumerate(df_summary.columns):
+                max_len = max(df_summary[col].astype(str).map(len).max(), len(str(col))) + 5
                 ws_summary.set_column(col_idx, col_idx, max(max_len, 12), cell_fmt)
                 ws_summary.write(0, col_idx, col, header_fmt)
 
-            chart_col_idx = len(df_summary_clean.columns) + 1
+            chart_col_idx = len(df_summary.columns) + 1
             chart_col_letter = xlsxwriter.utility.xl_col_to_name(chart_col_idx)
             chart = workbook.add_chart({'type': 'doughnut'})
-            max_row = len(df_summary_clean)
+            max_row = len(df_summary)
             chart.add_series({
                 'name':       'channel/actual visit',
                 'categories': ['Summary', 1, 0, max_row - 1, 0],
@@ -533,7 +535,7 @@ if uploaded_file is not None:
                     {"Choice Coverage Range": "1-4 SKUs", "Store Count": c_1_4, "Share (%)": f"{round((c_1_4/tot_visits)*100, 1)}%"},
                     {"Choice Coverage Range": "5-9 SKUs", "Store Count": c_5_9, "Share (%)": f"{round((c_5_9/tot_visits)*100, 1)}%"},
                     {"Choice Coverage Range": ">9 SKUs", "Store Count": c_gt_9, "Share (%)": f"{round((c_gt_9/tot_visits)*100, 1)}%"},
-                ])
+                ]).fillna('N/A')
 
                 client_deals = product_listing_deals.get(sheet_name, {})
                 sku_records = []
@@ -611,7 +613,7 @@ if uploaded_file is not None:
             # Export Overall & Channel Sheets
             export_detailed_channel_sheet(df, 'All Stores (Overall)')
 
-            for ch_label in [c for c in df_summary['Channel'] if c != 'Total' and df_summary.loc[df_summary['Channel']==c, 'Actual Visit'].values[0] > 0]:
+            for ch_label in valid_channels:
                 sub_df = df[df['店鋪_clean'].str.contains(ch_label, regex=False, na=False)]
                 sheet_title = str(ch_label).replace(':', '').replace('/', '-')[:30]
                 export_detailed_channel_sheet(sub_df, sheet_title)
