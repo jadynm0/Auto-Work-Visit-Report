@@ -37,7 +37,7 @@ CLIENT_NAME_MAP = {
     'UNY': ['UNY']
 }
 
-# 3. Product SKU Name Cross-Reference (Short Survey Names <-> Official Catalog Names)
+# 3. Product SKU Name Cross-Reference
 SKU_NAME_MAP = {
     '310ml楊枝甘露(常溫)': ['常溫楊枝甘露310ml', '芒果椰果柚子甘露310ml'],
     '蘆楊': ['蘆薈楊枝甘露', '蘆薈楊枝甘露450ml'],
@@ -97,7 +97,6 @@ def match_sku_deal(survey_sku, client_deals_dict):
     return None
 
 def parse_targets_dynamically(df_targets):
-    """Dynamically parses targets and total stores regardless of header row offsets."""
     targets_dict = {}
     total_shops_dict = {}
     
@@ -154,7 +153,6 @@ def parse_targets_dynamically(df_targets):
     return targets_dict, total_shops_dict
 
 def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mapping):
-    """Pure dynamic FMCG analytics synthesizer with zero cloud API dependencies."""
     total_audits = len(df)
     visited_dist = len(df_dist_summary[df_dist_summary['Status'] == 'Visited 🟢'])
     
@@ -215,10 +213,31 @@ if uploaded_file is not None:
     st.toast("File uploaded successfully! Processing summary...", icon="✅")
     
     try:
-        # 1. READ RAW SURVEY DATA
-        df_raw = pd.read_excel(uploaded_file, sheet_name='表格回應 1')
-        df_raw.columns = [str(c).strip() for c in df_raw.iloc[0]]
-        df = df_raw.iloc[1:].reset_index(drop=True)
+        # 1. READ RAW SURVEY DATA DYNAMICALLY (WORKS WITH ANY TAB NAME)
+        excel_obj = pd.ExcelFile(uploaded_file)
+        
+        survey_sheet_name = None
+        # Scan sheets to find the survey responses tab
+        for s_name in excel_obj.sheet_names:
+            preview_df = pd.read_excel(uploaded_file, sheet_name=s_name, nrows=3)
+            preview_text = " ".join([str(c) for c in preview_df.columns] + [str(v) for v in preview_df.values.flatten()])
+            if any(k in preview_text for k in ['店鋪', '姓名', '時間', '架上情況', '地區']):
+                survey_sheet_name = s_name
+                break
+                
+        if survey_sheet_name is None:
+            survey_sheet_name = excel_obj.sheet_names[0]
+
+        df_raw = pd.read_excel(uploaded_file, sheet_name=survey_sheet_name)
+        
+        # Check if actual header row is at row 0 or row 1
+        first_row_text = " ".join([str(c) for c in df_raw.iloc[0].values])
+        if any(k in first_row_text for k in ['店鋪', '姓名', '地區', '架上情況']):
+            df_raw.columns = [str(c).strip() for c in df_raw.iloc[0]]
+            df = df_raw.iloc[1:].reset_index(drop=True)
+        else:
+            df_raw.columns = [str(c).strip() for c in df_raw.columns]
+            df = df_raw.reset_index(drop=True)
         
         df['店鋪_clean'] = df['店鋪'].astype(str).str.strip()
         df['姓名_clean'] = df['姓名'].apply(normalize_salesperson)
@@ -258,9 +277,8 @@ if uploaded_file is not None:
         # 3. DYNAMIC TARGET & TOTAL STORE PARSER
         targets_dict = {}
         total_shops_dict = {}
-        excel_obj = pd.ExcelFile(uploaded_file)
         
-        target_sheets = [s for s in excel_obj.sheet_names if any(k in s.lower() for k in ['target', 'summary', '目標'])]
+        target_sheets = [s for s in excel_obj.sheet_names if s != survey_sheet_name and any(k in s.lower() for k in ['target', 'summary', '目標'])]
         if target_sheets:
             df_t_raw = pd.read_excel(uploaded_file, sheet_name=target_sheets[0])
             targets_dict, total_shops_dict = parse_targets_dynamically(df_t_raw)
