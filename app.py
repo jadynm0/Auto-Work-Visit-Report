@@ -205,7 +205,7 @@ if uploaded_file is not None:
     st.toast("File uploaded successfully! Processing summary...", icon="✅")
     
     try:
-        # 1. READ RAW SURVEY DATA DYNAMICALLY (PURE DYNAMIC PARSING)
+        # 1. READ RAW SURVEY DATA DYNAMICALLY
         excel_obj = pd.ExcelFile(uploaded_file)
         
         survey_sheet_name = None
@@ -230,7 +230,6 @@ if uploaded_file is not None:
             df = df_raw.reset_index(drop=True)
         
         df['店鋪_clean'] = df['店鋪'].astype(str).str.strip()
-        # 100% Dynamic Salesperson Extraction - Zero Hardcoded Names
         df['姓名_clean'] = df['姓名'].astype(str).str.strip()
         df['地區_clean'] = df['地區'].apply(normalize_district_18)
 
@@ -461,13 +460,13 @@ if uploaded_file is not None:
             st.markdown(ai_generated_text)
 
         # ---------------------------------------------------------
-        # SECTION 3: MULTI-TAB EXCEL EXPORT WORKBOOK
+        # SECTION 3: MULTI-TAB EXCEL EXPORT WORKBOOK (WITH NAN/INF FIX)
         # ---------------------------------------------------------
         st.divider()
         st.header("📥 Download Complete Formatted Excel Report")
         
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'nan_inf_to_errors': True}}) as writer:
             workbook = writer.book
             
             header_fmt = workbook.add_format({'bold': True, 'bg_color': '#4F81BD', 'font_color': 'white', 'border': 1, 'align': 'center'})
@@ -475,18 +474,19 @@ if uploaded_file is not None:
             ai_title_fmt = workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#1F497D'})
             ai_text_fmt = workbook.add_format({'text_wrap': True, 'font_size': 11})
 
-            # 1. Summary Sheet
-            df_summary.to_excel(writer, sheet_name='Summary', index=False)
+            # 1. Summary Sheet (Fill NaN to prevent write_number error)
+            df_summary_clean = df_summary.fillna('N/A')
+            df_summary_clean.to_excel(writer, sheet_name='Summary', index=False)
             ws_summary = writer.sheets['Summary']
-            for col_idx, col in enumerate(df_summary.columns):
-                max_len = max(df_summary[col].astype(str).map(len).max(), len(str(col))) + 5
+            for col_idx, col in enumerate(df_summary_clean.columns):
+                max_len = max(df_summary_clean[col].astype(str).map(len).max(), len(str(col))) + 5
                 ws_summary.set_column(col_idx, col_idx, max(max_len, 12), cell_fmt)
                 ws_summary.write(0, col_idx, col, header_fmt)
 
-            chart_col_idx = len(df_summary.columns) + 1
+            chart_col_idx = len(df_summary_clean.columns) + 1
             chart_col_letter = xlsxwriter.utility.xl_col_to_name(chart_col_idx)
             chart = workbook.add_chart({'type': 'doughnut'})
-            max_row = len(df_summary)
+            max_row = len(df_summary_clean)
             chart.add_series({
                 'name':       'channel/actual visit',
                 'categories': ['Summary', 1, 0, max_row - 1, 0],
@@ -568,7 +568,7 @@ if uploaded_file is not None:
                         "Coverage (%)": f"{cov}%",
                         "Performance Rating": get_coverage_rating(cov)
                     })
-                df_sku_details = pd.DataFrame(sku_records)
+                df_sku_details = pd.DataFrame(sku_records).fillna('N/A')
 
                 df_choice_matrix.to_excel(writer, sheet_name=sheet_name, startrow=0, index=False)
                 df_sku_details.to_excel(writer, sheet_name=sheet_name, startrow=7, index=False)
