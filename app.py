@@ -65,14 +65,6 @@ def normalize_district_18(d_str):
     }
     return mapping.get(d, d)
 
-def normalize_salesperson(sp_str):
-    s = str(sp_str).strip()
-    if s.lower() in ['chris wong', 'chriswong']:
-        return 'Chris Wong'
-    if s.lower() in ['eunice chu', 'eunice', 'eunicfg']:
-        return 'Eunice Chu'
-    return s
-
 def get_coverage_rating(cov_num):
     if cov_num >= 85:
         return "Good 🟢"
@@ -213,11 +205,10 @@ if uploaded_file is not None:
     st.toast("File uploaded successfully! Processing summary...", icon="✅")
     
     try:
-        # 1. READ RAW SURVEY DATA DYNAMICALLY (WORKS WITH ANY TAB NAME)
+        # 1. READ RAW SURVEY DATA DYNAMICALLY (PURE DYNAMIC PARSING)
         excel_obj = pd.ExcelFile(uploaded_file)
         
         survey_sheet_name = None
-        # Scan sheets to find the survey responses tab
         for s_name in excel_obj.sheet_names:
             preview_df = pd.read_excel(uploaded_file, sheet_name=s_name, nrows=3)
             preview_text = " ".join([str(c) for c in preview_df.columns] + [str(v) for v in preview_df.values.flatten()])
@@ -230,7 +221,6 @@ if uploaded_file is not None:
 
         df_raw = pd.read_excel(uploaded_file, sheet_name=survey_sheet_name)
         
-        # Check if actual header row is at row 0 or row 1
         first_row_text = " ".join([str(c) for c in df_raw.iloc[0].values])
         if any(k in first_row_text for k in ['店鋪', '姓名', '地區', '架上情況']):
             df_raw.columns = [str(c).strip() for c in df_raw.iloc[0]]
@@ -240,7 +230,8 @@ if uploaded_file is not None:
             df = df_raw.reset_index(drop=True)
         
         df['店鋪_clean'] = df['店鋪'].astype(str).str.strip()
-        df['姓名_clean'] = df['姓名'].apply(normalize_salesperson)
+        # 100% Dynamic Salesperson Extraction - Zero Hardcoded Names
+        df['姓名_clean'] = df['姓名'].astype(str).str.strip()
         df['地區_clean'] = df['地區'].apply(normalize_district_18)
 
         sku_cols = [c for c in df.columns if '架上情況 [' in str(c)]
@@ -303,7 +294,7 @@ if uploaded_file is not None:
 
         df_dist_summary = pd.DataFrame(district_summary_rows)
 
-        # 5. DYNAMIC CHANNEL & SALESPERSON TABLE (INCLUDING UNVISITED TARGET SHOPS)
+        # 5. DYNAMIC CHANNEL & SALESPERSON TABLE
         salespeople = [s for s in df['姓名_clean'].unique() if s and s != 'nan']
         visited_channels = df['店鋪_clean'].unique().tolist()
         all_channels = list(dict.fromkeys(visited_channels + list(targets_dict.keys())))
