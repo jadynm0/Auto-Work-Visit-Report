@@ -30,14 +30,26 @@ with col_up2:
         type=["xlsx"]
     )
 
-# 1. 18 HK Administrative Districts Grouped by Region
+# 1. Standard Fallback KA Monthly Targets (when workbook lacks a Targets sheet)
+DEFAULT_KA_TARGETS = {
+    '7-11': 100,
+    'Circle K': 40,
+    'Wellcome': 20,
+    'ParkNshop': 20,
+    '佳寶': 20,
+    'Aeon': 10,
+    "city'super": 10,
+    'UNY': 0
+}
+
+# 2. 18 HK Administrative Districts Grouped by Region
 HK_REGION_GROUPS = {
     'Hong Kong Island (港島)': ['中西區', '東區', '南區', '灣仔區'],
     'Kowloon (九龍)': ['九龍城區', '觀塘區', '深水埗區', '黃大仙區', '油尖旺區'],
     'New Territories & Islands (新界及離島)': ['離島區', '葵青區', '北區', '西貢區', '沙田區', '大埔區', '荃灣區', '屯門區', '元朗區']
 }
 
-# 2. Standard Client Name Map for Bilingual Alignment
+# 3. Standard Client Name Map for Bilingual Alignment
 CLIENT_NAME_MAP = {
     'Wellcome': ['Wellcome', '惠康'],
     'ParkNshop': ['ParkNshop', 'ParknShop', '百佳'],
@@ -51,7 +63,7 @@ CLIENT_NAME_MAP = {
     'UNY': ['UNY']
 }
 
-# 3. Product SKU Name Cross-Reference (Short Survey Names <-> Official Catalog Names)
+# 4. Product SKU Name Cross-Reference (Short Survey Names <-> Official Catalog Names)
 SKU_NAME_MAP = {
     '310ml楊枝甘露(常溫)': ['常溫楊枝甘露310ml', '芒果椰果柚子甘露310ml'],
     '蘆楊': ['蘆薈楊枝甘露', '蘆薈楊枝甘露450ml'],
@@ -62,7 +74,7 @@ SKU_NAME_MAP = {
     '無添加糖豆乳': ['無添加糖豆乳飲品500ml', '無添加糖豆漿']
 }
 
-# 4. Product Category Classification
+# 5. Product Category Classification
 CHILLED_KEYWORDS = ['蘆楊', '杏仁露', '紫米露', '奶茶', '竹笙', '雪梨川貝', '火麻仁', '紅豆沙', '綠豆沙', '火麻仁拿鐵', '黑豆黑芝麻', '花膠', '無添加糖豆乳']
 OTHER_KEYWORDS = ['湯', '豬腳薑', '龜苓膏']
 
@@ -184,7 +196,6 @@ def parse_targets_dynamically(df_targets):
     return targets_dict, total_shops_dict
 
 def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mapping, m_label_zh):
-    """Standardized AI Executive Analysis explicitly referencing Year and Month."""
     total_audits = len(df)
     visited_dist = len(df_dist_summary[df_dist_summary['Status'] == 'Visited 🟢'])
     
@@ -383,7 +394,6 @@ if st.session_state['stored_surveys']:
 if st.session_state['stored_surveys']:
     sorted_months = sorted(st.session_state['stored_surveys'].keys())
     
-    # Format month options for dropdown
     month_options_map = {m: f"{format_reporting_month(m)[0]} ({format_reporting_month(m)[1]} - {m})" for m in sorted_months}
     selected_display = st.selectbox(
         "📅 Select Active Reporting Month / Year:", 
@@ -391,7 +401,6 @@ if st.session_state['stored_surveys']:
         index=len(sorted_months)-1
     )
     
-    # Reverse lookup active key
     active_month = next(k for k, v in month_options_map.items() if v == selected_display)
     active_m_en, active_m_zh = format_reporting_month(active_month)
     
@@ -409,15 +418,19 @@ if st.session_state['stored_surveys']:
         return match.group(1).strip() if match else str(col_name).strip()
     sku_mapping = {col: clean_sku_name(col) for col in sku_cols}
 
-    # Dynamic target parsing
-    targets_dict = {}
+    # Dynamic target parsing with DEFAULT_KA_TARGETS fallback
+    targets_dict = DEFAULT_KA_TARGETS.copy()
     total_shops_dict = {}
     try:
         excel_obj = pd.ExcelFile(io.BytesIO(active_bytes))
         target_sheets = [s for s in excel_obj.sheet_names if any(k in s.lower() for k in ['target', 'summary', '目標'])]
         if target_sheets:
             df_t_raw = pd.read_excel(io.BytesIO(active_bytes), sheet_name=target_sheets[0])
-            targets_dict, total_shops_dict = parse_targets_dynamically(df_t_raw)
+            parsed_tg, parsed_hk = parse_targets_dynamically(df_t_raw)
+            if parsed_tg:
+                targets_dict.update(parsed_tg)
+            if parsed_hk:
+                total_shops_dict.update(parsed_hk)
     except Exception:
         pass
 
