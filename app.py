@@ -30,7 +30,7 @@ with col_up2:
         type=["xlsx"]
     )
 
-# 1. Standard Fallback KA Monthly Targets (when workbook lacks a Targets sheet)
+# 1. Standard Fallback KA Monthly Targets
 DEFAULT_KA_TARGETS = {
     '7-11': 100,
     'Circle K': 40,
@@ -63,7 +63,7 @@ CLIENT_NAME_MAP = {
     'UNY': ['UNY']
 }
 
-# 4. Product SKU Name Cross-Reference (Short Survey Names <-> Official Catalog Names)
+# 4. Product SKU Name Cross-Reference
 SKU_NAME_MAP = {
     '310ml楊枝甘露(常溫)': ['常溫楊枝甘露310ml', '芒果椰果柚子甘露310ml'],
     '蘆楊': ['蘆薈楊枝甘露', '蘆薈楊枝甘露450ml'],
@@ -652,7 +652,7 @@ if st.session_state['stored_surveys']:
         st.markdown(ai_generated_text)
 
     # ---------------------------------------------------------
-    # MULTI-TAB EXCEL EXPORT WORKBOOK
+    # MULTI-TAB EXCEL EXPORT WORKBOOK (WITH MOM HISTORICAL SHEET)
     # ---------------------------------------------------------
     st.divider()
     st.header(f"📥 Download Complete Formatted Excel Report ({active_m_en})")
@@ -664,6 +664,7 @@ if st.session_state['stored_surveys']:
         ai_title_fmt = workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#1F497D'})
         ai_text_fmt = workbook.add_format({'text_wrap': True, 'font_size': 11})
 
+        # 1. Summary Sheet
         df_summary.to_excel(writer, sheet_name='Summary', index=False)
         ws_summary = writer.sheets['Summary']
         for col_idx, col in enumerate(df_summary.columns):
@@ -671,6 +672,7 @@ if st.session_state['stored_surveys']:
             ws_summary.set_column(col_idx, col_idx, max(max_len, 12), cell_fmt)
             ws_summary.write(0, col_idx, col, header_fmt)
 
+        # 2. District Coverage Sheet
         df_dist_summary.to_excel(writer, sheet_name='District Coverage', index=False)
         ws_dist = writer.sheets['District Coverage']
         for col_idx, col in enumerate(df_dist_summary.columns):
@@ -678,6 +680,7 @@ if st.session_state['stored_surveys']:
             ws_dist.set_column(col_idx, col_idx, max(max_len, 15), cell_fmt)
             ws_dist.write(0, col_idx, col, header_fmt)
 
+        # 3. AI Views & Recommendations Sheet
         ws_ai = workbook.add_worksheet('AI Views & Recommendations')
         ws_ai.set_column('A:A', 115)
         ws_ai.write('A1', f'💡 Monthly Market Report: AI Views & Strategic Recommendations ({active_m_en} / {active_m_zh})', ai_title_fmt)
@@ -688,6 +691,70 @@ if st.session_state['stored_surveys']:
             else:
                 ws_ai.write(r_idx, 0, line, ai_text_fmt)
 
+        # 4. Multi-Month Historical Trend Sheet (Exported automatically if >= 2 months loaded)
+        if len(sorted_months) > 1:
+            ws_mom = workbook.add_worksheet('MoM Trend Analysis')
+            ws_mom.write('A1', '📈 1. Monthly Store Audit Progression by Channel (MoM)', workbook.add_format({'bold': True, 'font_size': 13, 'font_color': '#1F497D'}))
+            
+            # Build Channel MoM comparison table
+            ch_list = ['7-11', 'Circle K', 'Wellcome', 'ParkNshop', '佳寶', 'Aeon', "city'super", 'UNY', 'Total']
+            ch_mom_records = []
+            for ch in ch_list:
+                rec = {'Channel': ch}
+                for m_key in sorted_months:
+                    d_m, _, _ = st.session_state['stored_surveys'][m_key]
+                    m_name = format_reporting_month(m_key)[0]
+                    if ch == 'Total':
+                        cnt = len(d_m)
+                    else:
+                        cnt = len(d_m[d_m['店鋪'].astype(str).str.contains(ch, regex=False, na=False)])
+                    rec[f'{m_name} Audits'] = cnt
+                ch_mom_records.append(rec)
+            df_ch_mom_exp = pd.DataFrame(ch_mom_records)
+            df_ch_mom_exp.to_excel(writer, sheet_name='MoM Trend Analysis', startrow=2, index=False)
+
+            # Build Hero SKU Coverage MoM table
+            start_sku_row = len(df_ch_mom_exp) + 5
+            ws_mom.write(start_sku_row - 1, 0, '🛒 2. Core Hero SKU Shelf Coverage % Evolution (MoM)', workbook.add_format({'bold': True, 'font_size': 13, 'font_color': '#1F497D'}))
+            
+            hero_skus_list = ['蘆楊', '夏枯草', '雞骨草', '竹蔗茅根', '咸柑桔', '紫米露', '紅豆沙', '綠豆沙', '五花茶1L', '甘蔗汁1L', '杏仁露']
+            sku_mom_records = []
+            for hero in hero_skus_list:
+                s_rec = {'Product SKU': hero}
+                for m_key in sorted_months:
+                    d_m, _, _ = st.session_state['stored_surveys'][m_key]
+                    m_name = format_reporting_month(m_key)[0]
+                    matching_c = [c for c in d_m.columns if hero in c]
+                    cov_pct = 0.0
+                    if matching_c and len(d_m) > 0:
+                        in_c = d_m[matching_c[0]].astype(str).str.contains('有貨').sum()
+                        cov_pct = round((in_c / len(d_m)) * 100, 1)
+                    s_rec[f'{m_name} Coverage'] = f"{cov_pct}%"
+                sku_mom_records.append(s_rec)
+            df_sku_mom_exp = pd.DataFrame(sku_mom_records)
+            df_sku_mom_exp.to_excel(writer, sheet_name='MoM Trend Analysis', startrow=start_sku_row, index=False)
+
+            # Format MoM columns & add Chart
+            for col_i in range(len(df_ch_mom_exp.columns)):
+                ws_mom.set_column(col_i, col_i, 22, cell_fmt)
+                ws_mom.write(2, col_i, df_ch_mom_exp.columns[col_i], header_fmt)
+            for col_i in range(len(df_sku_mom_exp.columns)):
+                ws_mom.write(start_sku_row, col_i, df_sku_mom_exp.columns[col_i], header_fmt)
+
+            # Insert Volume Chart
+            chart_vol = workbook.add_chart({'type': 'column'})
+            max_r = len(df_ch_mom_exp) + 1
+            for col_idx_m in range(1, len(df_ch_mom_exp.columns)):
+                chart_vol.add_series({
+                    'name':       ['MoM Trend Analysis', 2, col_idx_m],
+                    'categories': ['MoM Trend Analysis', 3, 0, max_r, 0],
+                    'values':     ['MoM Trend Analysis', 3, col_idx_m, max_r, col_idx_m],
+                })
+            chart_vol.set_title({'name': 'Channel Audit Volume Progression (MoM)'})
+            chart_vol.set_size({'width': 650, 'height': 320})
+            ws_mom.insert_chart('G3', chart_vol)
+
+        # 5. Channel Sheets Helper
         def export_detailed_channel_sheet(sub_df, sheet_name):
             tot_visits = len(sub_df)
             if tot_visits == 0:
