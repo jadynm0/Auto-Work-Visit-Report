@@ -5,16 +5,30 @@ import plotly.graph_objects as go
 import xlsxwriter
 import re
 import io
+from datetime import datetime
 
 st.set_page_config(page_title="Market Visit Summary Dashboard", page_icon="📊", layout="wide")
 st.title("📊 Monthly Market Visit Performance & AI Strategic Dashboard")
 
-# Dual File Uploaders with Multi-File Support for Historical Tracking
+# Initialize persistent in-app session storage
+if 'stored_surveys' not in st.session_state:
+    st.session_state['stored_surveys'] = {}
+if 'stored_pl_deals' not in st.session_state:
+    st.session_state['stored_pl_deals'] = {}
+
+# Dual File Uploaders
 col_up1, col_up2 = st.columns(2)
 with col_up1:
-    uploaded_files = st.file_uploader("1. Upload Market Visit Survey File(s) (.xlsx) [Select 1 or Multiple Months]", type=["xlsx"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader(
+        "1. Upload Market Visit Survey File(s) (.xlsx) [Single or Multiple Months]", 
+        type=["xlsx"], 
+        accept_multiple_files=True
+    )
 with col_up2:
-    uploaded_pl = st.file_uploader("2. Upload Product Listing File (.xlsx) [Optional]", type=["xlsx"])
+    uploaded_pl = st.file_uploader(
+        "2. Upload Product Listing File (.xlsx) [Optional]", 
+        type=["xlsx"]
+    )
 
 # 1. 18 HK Administrative Districts Grouped by Region
 HK_REGION_GROUPS = {
@@ -23,7 +37,7 @@ HK_REGION_GROUPS = {
     'New Territories & Islands (新界及離島)': ['離島區', '葵青區', '北區', '西貢區', '沙田區', '大埔區', '荃灣區', '屯門區', '元朗區']
 }
 
-# 2. Standard Client Name Map
+# 2. Standard Client Name Map for Bilingual Alignment
 CLIENT_NAME_MAP = {
     'Wellcome': ['Wellcome', '惠康'],
     'ParkNshop': ['ParkNshop', 'ParknShop', '百佳'],
@@ -37,16 +51,18 @@ CLIENT_NAME_MAP = {
     'UNY': ['UNY']
 }
 
-# 3. Product SKU Name Cross-Reference
+# 3. Product SKU Name Cross-Reference (Short Survey Names <-> Official Catalog Names)
 SKU_NAME_MAP = {
     '310ml楊枝甘露(常溫)': ['常溫楊枝甘露310ml', '芒果椰果柚子甘露310ml'],
     '蘆楊': ['蘆薈楊枝甘露', '蘆薈楊枝甘露450ml'],
     '紫米露': ['椰香紫米甘露', '椰香紫米甘露 330g'],
     '爆檸蜜': ['凍檸蜜'],
     '花膠冰糖雪耳甘露飲品': ['花膠雪耳冰糖甘露', '花膠雪耳冰糖甘露330g'],
-    '杏仁露': ['杏仁露 330ml']
+    '杏仁露': ['杏仁露 330ml'],
+    '無添加糖豆乳': ['無添加糖豆乳飲品500ml', '無添加糖豆漿']
 }
 
+# 4. Product Category Classification
 CHILLED_KEYWORDS = ['蘆楊', '杏仁露', '紫米露', '奶茶', '竹笙', '雪梨川貝', '火麻仁', '紅豆沙', '綠豆沙', '火麻仁拿鐵', '黑豆黑芝麻', '花膠', '無添加糖豆乳']
 OTHER_KEYWORDS = ['湯', '豬腳薑', '龜苓膏']
 
@@ -58,6 +74,15 @@ def get_product_category(sku_name):
         return 'Chilled Beverages & Desserts (鮮製飲品及甜品)'
     else:
         return 'Room-Temperature Beverages (常溫/預製飲品)'
+
+def format_reporting_month(m_key):
+    """Converts 202606 -> ('June 2026', '2026年6月')"""
+    m_match = re.search(r'(\d{4})(\d{2})', str(m_key))
+    if m_match:
+        year, month = m_match.group(1), m_match.group(2)
+        dt = datetime.strptime(f"{year}{month}", "%Y%m")
+        return dt.strftime("%B %Y"), f"{year}年{int(month)}月"
+    return str(m_key), str(m_key)
 
 def normalize_district_18(d_str):
     d = str(d_str).strip()
@@ -158,7 +183,8 @@ def parse_targets_dynamically(df_targets):
                 
     return targets_dict, total_shops_dict
 
-def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mapping):
+def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mapping, m_label_zh):
+    """Standardized AI Executive Analysis explicitly referencing Year and Month."""
     total_audits = len(df)
     visited_dist = len(df_dist_summary[df_dist_summary['Status'] == 'Visited 🟢'])
     
@@ -210,10 +236,10 @@ def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mappin
                 'zero_count': len([x for x in ch_skus if x[2] == 0])
             }
 
-    text = f"""### 📊 一、 全局市場分析與洞察 (Market Analysis & Findings)
+    text = f"""### 📊 一、 全局市場分析與洞察 ({m_label_zh} Market Analysis & Findings)
 
 #### 1. 通路巡查執行力與目標達成 (Audit Execution & Objectives)
-* **整體走訪覆蓋**: 全月實地走訪各大零售通路共 **{total_audits} 間分店**，全面覆蓋全港 **{visited_dist}/18 個行政區**。
+* **整體走訪覆蓋**: {m_label_zh}實地走訪各大零售通路共 **{total_audits} 間分店**，全面覆蓋全港 **{visited_dist}/18 個行政區**。
 * **重點通路執行情況**:
   * **超額/順利完成通路**: {('、'.join(met_channels)) if met_channels else '各通路穩定走訪'}。
   * **存在缺口/進度落後通路**: {('、'.join(missed_channels)) if missed_channels else '無明顯落後通路，整體外勤執行度良好'}。
@@ -263,7 +289,7 @@ def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mappin
 
 ---
 
-### 🎯 二、 通路策略與行銷建議 (Marketing & Business Strategy Recommendations)
+### 🎯 二、 通路策略與行銷建議 ({m_label_zh} Strategic Recommendations)
 
 #### 1. SKU 結構調整與資源重組 (SKU Optimization)
 * **【引爆明星】擴大「楊枝甘露」與 1L 家庭裝效應**:
@@ -289,10 +315,41 @@ def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mappin
 """
     return text
 
+# ---------------------------------------------------------
+# PROCESS PRODUCT LISTING
+# ---------------------------------------------------------
+if uploaded_pl is not None:
+    try:
+        df_pl = pd.read_excel(uploaded_pl, sheet_name=0)
+        clients_raw = [str(c).replace('\n', ' ').strip() for c in df_pl.iloc[3, 2:].values if pd.notnull(c)]
+        parsed_deals = {}
+        for r_idx in range(4, len(df_pl)):
+            sku_name = str(df_pl.iloc[r_idx, 1]).strip()
+            if sku_name and sku_name != 'nan' and 'sub total' not in sku_name.lower():
+                for c_idx, raw_client in enumerate(clients_raw):
+                    if (c_idx + 2) < len(df_pl.columns):
+                        val = str(df_pl.iloc[r_idx, c_idx + 2]).strip().upper()
+                        std_channel = raw_client
+                        for std_ch, aliases in CLIENT_NAME_MAP.items():
+                            if any(a.lower() in raw_client.lower() or raw_client.lower() in a.lower() for a in aliases):
+                                std_channel = std_ch
+                                break
+                        if std_channel not in parsed_deals:
+                            parsed_deals[std_channel] = {}
+                        
+                        if val == 'P':
+                            parsed_deals[std_channel][sku_name] = True
+                        elif sku_name not in parsed_deals[std_channel]:
+                            parsed_deals[std_channel][sku_name] = False
+        st.session_state['stored_pl_deals'] = parsed_deals
+        st.toast("Product listing deals loaded & stored in memory!", icon="📜")
+    except Exception as e:
+        st.error(f"Error parsing product listing: {e}")
+
+# ---------------------------------------------------------
+# PROCESS AND PERSIST SURVEY WORKBOOKS IN IN-APP STORAGE
+# ---------------------------------------------------------
 if uploaded_files:
-    st.toast(f"{len(uploaded_files)} monthly file(s) loaded!", icon="✅")
-    
-    monthly_datasets = {}
     for u_file in uploaded_files:
         try:
             excel_obj = pd.ExcelFile(u_file)
@@ -307,15 +364,41 @@ if uploaded_files:
                 
             m_match = re.search(r'2026\d{2}', u_file.name)
             m_label = m_match.group(0) if m_match else u_file.name[:10]
-            monthly_datasets[m_label] = (df_m, u_file)
+            st.session_state['stored_surveys'][m_label] = (df_m, u_file.name, u_file.getvalue())
         except Exception:
             pass
 
-    sorted_months = sorted(monthly_datasets.keys())
-    active_month = st.selectbox("📅 Select Active Reporting Month:", options=sorted_months, index=len(sorted_months)-1)
+# Manage in-app storage via an expander
+if st.session_state['stored_surveys']:
+    with st.expander(f"🗄️ In-App Historical Storage: {len(st.session_state['stored_surveys'])} Month(s) Loaded", expanded=False):
+        stored_tags = [f"`{format_reporting_month(m)[0]}`" for m in sorted(st.session_state['stored_surveys'].keys())]
+        st.write("Loaded Month(s): " + ", ".join(stored_tags))
+        if st.button("🗑️ Clear All Stored Historical Months"):
+            st.session_state['stored_surveys'] = {}
+            st.rerun()
+
+# ---------------------------------------------------------
+# ACTIVE REPORTING RENDER
+# ---------------------------------------------------------
+if st.session_state['stored_surveys']:
+    sorted_months = sorted(st.session_state['stored_surveys'].keys())
     
-    df, active_file = monthly_datasets[active_month]
+    # Format month options for dropdown
+    month_options_map = {m: f"{format_reporting_month(m)[0]} ({format_reporting_month(m)[1]} - {m})" for m in sorted_months}
+    selected_display = st.selectbox(
+        "📅 Select Active Reporting Month / Year:", 
+        options=list(month_options_map.values()), 
+        index=len(sorted_months)-1
+    )
     
+    # Reverse lookup active key
+    active_month = next(k for k, v in month_options_map.items() if v == selected_display)
+    active_m_en, active_m_zh = format_reporting_month(active_month)
+    
+    df, active_fname, active_bytes = st.session_state['stored_surveys'][active_month]
+    product_listing_deals = st.session_state.get('stored_pl_deals', {})
+
+    # Data cleaning
     df['店鋪_clean'] = df['店鋪'].astype(str).str.strip()
     df['姓名_clean'] = df['姓名'].astype(str).str.strip()
     df['地區_clean'] = df['地區'].apply(normalize_district_18)
@@ -326,42 +409,19 @@ if uploaded_files:
         return match.group(1).strip() if match else str(col_name).strip()
     sku_mapping = {col: clean_sku_name(col) for col in sku_cols}
 
-    # Product Listing Deals (With preservation of 'P' deals across multiple pack rows)
-    product_listing_deals = {}
-    if uploaded_pl is not None:
-        try:
-            df_pl = pd.read_excel(uploaded_pl, sheet_name=0)
-            clients_raw = [str(c).replace('\n', ' ').strip() for c in df_pl.iloc[3, 2:].values if pd.notnull(c)]
-            for r_idx in range(4, len(df_pl)):
-                sku_name = str(df_pl.iloc[r_idx, 1]).strip()
-                if sku_name and sku_name != 'nan' and 'sub total' not in sku_name.lower():
-                    for c_idx, raw_client in enumerate(clients_raw):
-                        if (c_idx + 2) < len(df_pl.columns):
-                            val = str(df_pl.iloc[r_idx, c_idx + 2]).strip().upper()
-                            std_channel = raw_client
-                            for std_ch, aliases in CLIENT_NAME_MAP.items():
-                                if any(a.lower() in raw_client.lower() or raw_client.lower() in a.lower() for a in aliases):
-                                    std_channel = std_ch
-                                    break
-                            if std_channel not in product_listing_deals:
-                                product_listing_deals[std_channel] = {}
-                            
-                            # Preserve True if already tagged 'P'
-                            if val == 'P':
-                                product_listing_deals[std_channel][sku_name] = True
-                            elif sku_name not in product_listing_deals[std_channel]:
-                                product_listing_deals[std_channel][sku_name] = False
-        except Exception:
-            pass
-
+    # Dynamic target parsing
     targets_dict = {}
     total_shops_dict = {}
-    excel_obj = pd.ExcelFile(active_file)
-    target_sheets = [s for s in excel_obj.sheet_names if any(k in s.lower() for k in ['target', 'summary', '目標'])]
-    if target_sheets:
-        df_t_raw = pd.read_excel(active_file, sheet_name=target_sheets[0])
-        targets_dict, total_shops_dict = parse_targets_dynamically(df_t_raw)
+    try:
+        excel_obj = pd.ExcelFile(io.BytesIO(active_bytes))
+        target_sheets = [s for s in excel_obj.sheet_names if any(k in s.lower() for k in ['target', 'summary', '目標'])]
+        if target_sheets:
+            df_t_raw = pd.read_excel(io.BytesIO(active_bytes), sheet_name=target_sheets[0])
+            targets_dict, total_shops_dict = parse_targets_dynamically(df_t_raw)
+    except Exception:
+        pass
 
+    # District coverage
     dist_counts_series = df['地區_clean'].value_counts()
     district_summary_rows = []
     visited_count_18 = 0
@@ -379,6 +439,7 @@ if uploaded_files:
             })
     df_dist_summary = pd.DataFrame(district_summary_rows).fillna('N/A')
 
+    # Channel summary
     salespeople = [str(s).strip() for s in df['姓名_clean'].unique() if pd.notnull(s) and str(s).strip().lower() not in ['nan', 'none', '']]
     visited_channels = df['店鋪_clean'].unique().tolist()
     all_channels = list(dict.fromkeys(visited_channels + list(targets_dict.keys())))
@@ -425,7 +486,7 @@ if uploaded_files:
     summary_rows.append(total_row)
     df_summary = pd.DataFrame(summary_rows).fillna('N/A')
 
-    ai_generated_text = generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mapping)
+    ai_generated_text = generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mapping, active_m_zh)
 
     # ---------------------------------------------------------
     # MAIN DASHBOARD TABS
@@ -433,7 +494,7 @@ if uploaded_files:
     tab_dash, tab_trend, tab_ai = st.tabs(["📊 Performance Dashboard", "📈 Multi-Month Trend Analysis", "💡 AI Strategic Recommendations"])
 
     with tab_dash:
-        st.header(f"📌 {active_month} Market Visit Summary")
+        st.header(f"📌 {active_m_en} ({active_m_zh}) Market Visit Summary")
         m_col1, m_col2 = st.columns([1, 2])
         m_col1.metric("Total Stores Audited", len(df))
         m_col2.metric("HK 18-District Coverage", f"{visited_count_18}/18 Administrative Districts Audited")
@@ -462,6 +523,7 @@ if uploaded_files:
         df_ch = df if selected_ch == "All Stores (Overall)" else df[df['店鋪_clean'].str.contains(selected_ch, regex=False, na=False)]
         tot_v = len(df_ch)
 
+        # Choice Coverage Matrix
         st.subheader(f"📊 {selected_ch} - Choice Coverage Breakdown")
         in_stock_counts = df_ch[sku_cols].apply(lambda row: row.astype(str).str.contains('有貨').sum(), axis=1)
         c_0 = (in_stock_counts == 0).sum()
@@ -476,6 +538,7 @@ if uploaded_files:
         ]).fillna('N/A')
         st.dataframe(df_choice, use_container_width=True)
 
+        # SKU Availability Table
         st.subheader(f"🛒 {selected_ch} - Detailed SKU Availability")
         sku_details = []
         client_deals = product_listing_deals.get(selected_ch, {})
@@ -519,6 +582,7 @@ if uploaded_files:
         df_sku_view = pd.DataFrame(sku_details).fillna('N/A')
         st.dataframe(df_sku_view, use_container_width=True)
 
+        # Category Stock Charts
         if selected_ch != "All Stores (Overall)" and len(df_sku_view) > 0:
             st.subheader(f"📈 {selected_ch} - Category Stock Charts")
             cat_tabs = st.tabs(["🍵 Room-Temperature (常溫)", "🍧 Chilled & Desserts (鮮製及甜品)", "🍲 Others & Soups (湯品及其他)"])
@@ -540,14 +604,15 @@ if uploaded_files:
                         st.plotly_chart(fig_bar, use_container_width=True)
 
     with tab_trend:
-        st.header("📈 Multi-Month Historical Trend Tracking")
+        st.header("📈 Multi-Month Historical Trend Tracking (2026 MoM Analytics)")
         if len(sorted_months) > 1:
             trend_data = []
             for m_key in sorted_months:
-                d_m, _ = monthly_datasets[m_key]
+                d_m, _, _ = st.session_state['stored_surveys'][m_key]
                 t_aud = len(d_m)
-                row_trend = {"Month": m_key, "Total Audits": t_aud}
-                for hero in ['蘆楊', '夏枯草', '雞骨草', '紫米露', '紅豆沙', '綠豆沙', '五花茶1L']:
+                m_label_display = format_reporting_month(m_key)[0]
+                row_trend = {"Month": m_label_display, "Total Audits": t_aud}
+                for hero in ['蘆楊', '夏枯草', '雞骨草', '竹蔗茅根', '咸柑桔', '紫米露', '紅豆沙', '綠豆沙', '五花茶1L']:
                     matching_c = [c for c in d_m.columns if hero in c]
                     if matching_c:
                         in_cnt = d_m[matching_c[0]].astype(str).str.contains('有貨').sum()
@@ -555,11 +620,11 @@ if uploaded_files:
                 trend_data.append(row_trend)
                 
             df_trend = pd.DataFrame(trend_data)
-            st.subheader("1. Monthly Audit Volume Progression")
+            st.subheader("1. Monthly Audit Volume Progression (2026)")
             fig_vol = px.bar(df_trend, x='Month', y='Total Audits', text='Total Audits', color='Month', color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig_vol, use_container_width=True)
             
-            st.subheader("2. Core Hero SKU Coverage % Month-over-Month")
+            st.subheader("2. Core Hero SKU Coverage % Month-over-Month Evolution")
             hero_skus = [c for c in df_trend.columns if c not in ['Month', 'Total Audits']]
             fig_line = px.line(df_trend, x='Month', y=hero_skus, markers=True)
             fig_line.update_layout(yaxis_title="Coverage Rate (%)", height=500)
@@ -567,17 +632,17 @@ if uploaded_files:
             
             st.dataframe(df_trend, use_container_width=True)
         else:
-            st.info("💡 Upload 2 or more monthly survey files (e.g. 202606 and 202607) in Uploader #1 to generate automated multi-month trend charts.")
+            st.info("💡 Upload another month's survey file (e.g. upload June 2026, then upload July 2026) to generate automated multi-month trend charts.")
 
     with tab_ai:
-        st.header(f"💡 AI Executive Summary ({active_month})")
+        st.header(f"💡 AI Executive Summary ({active_m_en} / {active_m_zh})")
         st.markdown(ai_generated_text)
 
     # ---------------------------------------------------------
     # MULTI-TAB EXCEL EXPORT WORKBOOK
     # ---------------------------------------------------------
     st.divider()
-    st.header("📥 Download Complete Formatted Excel Report")
+    st.header(f"📥 Download Complete Formatted Excel Report ({active_m_en})")
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'nan_inf_to_errors': True}}) as writer:
         workbook = writer.book
@@ -602,7 +667,7 @@ if uploaded_files:
 
         ws_ai = workbook.add_worksheet('AI Views & Recommendations')
         ws_ai.set_column('A:A', 115)
-        ws_ai.write('A1', f'💡 Monthly Market Report: AI Views & Strategic Recommendations ({active_month})', ai_title_fmt)
+        ws_ai.write('A1', f'💡 Monthly Market Report: AI Views & Strategic Recommendations ({active_m_en} / {active_m_zh})', ai_title_fmt)
         clean_lines = [line.strip() for line in ai_generated_text.split('\n') if line.strip()]
         for r_idx, line in enumerate(clean_lines, start=3):
             if line.startswith("#") or line.startswith("📊") or line.startswith("💡") or line.startswith("* **"):
@@ -713,8 +778,8 @@ if uploaded_files:
             export_detailed_channel_sheet(sub_df, sheet_title)
 
     st.download_button(
-        label=f"🟢 Download Complete Formatted Excel Report ({active_month})",
+        label=f"🟢 Download Complete Formatted Excel Report ({active_m_en})",
         data=output.getvalue(),
-        file_name=f"Market_Visit_Summary_{active_file.name}",
+        file_name=f"Market_Visit_Summary_{active_month}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
