@@ -95,10 +95,12 @@ def match_sku_deal(survey_sku, client_deals_dict):
     for pl_sku, has_p in client_deals_dict.items():
         clean_p = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', str(pl_sku)).lower()
         if any(re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', a).lower() in clean_p for a in aliases):
-            return has_p
+            if has_p:
+                return True
         if clean_s == clean_p or clean_s in clean_p or clean_p in clean_s:
-            return has_p
-    return None
+            if has_p:
+                return True
+    return False
 
 def parse_targets_dynamically(df_targets):
     targets_dict = {}
@@ -157,15 +159,9 @@ def parse_targets_dynamically(df_targets):
     return targets_dict, total_shops_dict
 
 def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mapping):
-    """
-    Standardized AI Executive Analysis aligned with Audrey's structure:
-    1. Market Analysis (Objectives, Channel Listing, Star/Problem SKUs)
-    2. Marketing & Business Strategy Recommendations (Open-ended actionable advice)
-    """
     total_audits = len(df)
     visited_dist = len(df_dist_summary[df_dist_summary['Status'] == 'Visited 🟢'])
     
-    # Audit target metrics
     met_channels = []
     missed_channels = []
     for _, r in df_summary[df_summary['Channel'] != 'Total'].iterrows():
@@ -181,7 +177,6 @@ def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mappin
         elif act > 0:
             met_channels.append(f"{ch}（走訪{act}間）")
 
-    # SKU statistics calculation
     sku_stats = []
     for orig_col, clean_name in sku_mapping.items():
         col_s = df[orig_col].astype(str)
@@ -198,7 +193,6 @@ def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mappin
     problem_skus = df_sku_stat[df_sku_stat['cov'] < 10.0].sort_values(by='cov', ascending=True)
     oos_alerts = df_sku_stat[df_sku_stat['oos'] > 0].sort_values(by='oos', ascending=False).head(5)
 
-    # Channel level extraction
     ch_profiles = {}
     for ch in ['7-11', 'Circle K', 'Wellcome', 'ParkNshop', '佳寶', 'Aeon', "city'super"]:
         sub = df[df['店鋪_clean'].str.contains(ch, regex=False, na=False)]
@@ -216,9 +210,6 @@ def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mappin
                 'zero_count': len([x for x in ch_skus if x[2] == 0])
             }
 
-    # ==========================================
-    # BUILD STANDARDIZED REPORT
-    # ==========================================
     text = f"""### 📊 一、 全局市場分析與洞察 (Market Analysis & Findings)
 
 #### 1. 通路巡查執行力與目標達成 (Audit Execution & Objectives)
@@ -301,9 +292,7 @@ def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mappin
 if uploaded_files:
     st.toast(f"{len(uploaded_files)} monthly file(s) loaded!", icon="✅")
     
-    # Process multiple files
     monthly_datasets = {}
-    
     for u_file in uploaded_files:
         try:
             excel_obj = pd.ExcelFile(u_file)
@@ -316,20 +305,17 @@ if uploaded_files:
             else:
                 df_m = raw_d.reset_index(drop=True)
                 
-            # Deduce month label
             m_match = re.search(r'2026\d{2}', u_file.name)
             m_label = m_match.group(0) if m_match else u_file.name[:10]
             monthly_datasets[m_label] = (df_m, u_file)
         except Exception:
             pass
 
-    # Sort months chronologically
     sorted_months = sorted(monthly_datasets.keys())
     active_month = st.selectbox("📅 Select Active Reporting Month:", options=sorted_months, index=len(sorted_months)-1)
     
     df, active_file = monthly_datasets[active_month]
     
-    # Standard cleanings
     df['店鋪_clean'] = df['店鋪'].astype(str).str.strip()
     df['姓名_clean'] = df['姓名'].astype(str).str.strip()
     df['地區_clean'] = df['地區'].apply(normalize_district_18)
@@ -340,7 +326,7 @@ if uploaded_files:
         return match.group(1).strip() if match else str(col_name).strip()
     sku_mapping = {col: clean_sku_name(col) for col in sku_cols}
 
-    # Product Listing Deals
+    # Product Listing Deals (With preservation of 'P' deals across multiple pack rows)
     product_listing_deals = {}
     if uploaded_pl is not None:
         try:
@@ -348,7 +334,7 @@ if uploaded_files:
             clients_raw = [str(c).replace('\n', ' ').strip() for c in df_pl.iloc[3, 2:].values if pd.notnull(c)]
             for r_idx in range(4, len(df_pl)):
                 sku_name = str(df_pl.iloc[r_idx, 1]).strip()
-                if sku_name and sku_name != 'nan':
+                if sku_name and sku_name != 'nan' and 'sub total' not in sku_name.lower():
                     for c_idx, raw_client in enumerate(clients_raw):
                         if (c_idx + 2) < len(df_pl.columns):
                             val = str(df_pl.iloc[r_idx, c_idx + 2]).strip().upper()
@@ -359,11 +345,15 @@ if uploaded_files:
                                     break
                             if std_channel not in product_listing_deals:
                                 product_listing_deals[std_channel] = {}
-                            product_listing_deals[std_channel][sku_name] = (val == 'P')
+                            
+                            # Preserve True if already tagged 'P'
+                            if val == 'P':
+                                product_listing_deals[std_channel][sku_name] = True
+                            elif sku_name not in product_listing_deals[std_channel]:
+                                product_listing_deals[std_channel][sku_name] = False
         except Exception:
             pass
 
-    # Targets
     targets_dict = {}
     total_shops_dict = {}
     excel_obj = pd.ExcelFile(active_file)
@@ -372,7 +362,6 @@ if uploaded_files:
         df_t_raw = pd.read_excel(active_file, sheet_name=target_sheets[0])
         targets_dict, total_shops_dict = parse_targets_dynamically(df_t_raw)
 
-    # Districts
     dist_counts_series = df['地區_clean'].value_counts()
     district_summary_rows = []
     visited_count_18 = 0
@@ -390,7 +379,6 @@ if uploaded_files:
             })
     df_dist_summary = pd.DataFrame(district_summary_rows).fillna('N/A')
 
-    # Channel Summary
     salespeople = [str(s).strip() for s in df['姓名_clean'].unique() if pd.notnull(s) and str(s).strip().lower() not in ['nan', 'none', '']]
     visited_channels = df['店鋪_clean'].unique().tolist()
     all_channels = list(dict.fromkeys(visited_channels + list(targets_dict.keys())))
@@ -440,7 +428,7 @@ if uploaded_files:
     ai_generated_text = generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mapping)
 
     # ---------------------------------------------------------
-    # MAIN DASHBOARD TABS (INCLUDING MULTI-MONTH TREND ANALYSIS)
+    # MAIN DASHBOARD TABS
     # ---------------------------------------------------------
     tab_dash, tab_trend, tab_ai = st.tabs(["📊 Performance Dashboard", "📈 Multi-Month Trend Analysis", "💡 AI Strategic Recommendations"])
 
@@ -474,7 +462,6 @@ if uploaded_files:
         df_ch = df if selected_ch == "All Stores (Overall)" else df[df['店鋪_clean'].str.contains(selected_ch, regex=False, na=False)]
         tot_v = len(df_ch)
 
-        # Choice Coverage Range
         st.subheader(f"📊 {selected_ch} - Choice Coverage Breakdown")
         in_stock_counts = df_ch[sku_cols].apply(lambda row: row.astype(str).str.contains('有貨').sum(), axis=1)
         c_0 = (in_stock_counts == 0).sum()
@@ -489,7 +476,6 @@ if uploaded_files:
         ]).fillna('N/A')
         st.dataframe(df_choice, use_container_width=True)
 
-        # Detailed Table
         st.subheader(f"🛒 {selected_ch} - Detailed SKU Availability")
         sku_details = []
         client_deals = product_listing_deals.get(selected_ch, {})
@@ -560,8 +546,6 @@ if uploaded_files:
             for m_key in sorted_months:
                 d_m, _ = monthly_datasets[m_key]
                 t_aud = len(d_m)
-                
-                # Check coverage for key hero products across months
                 row_trend = {"Month": m_key, "Total Audits": t_aud}
                 for hero in ['蘆楊', '夏枯草', '雞骨草', '紫米露', '紅豆沙', '綠豆沙', '五花茶1L']:
                     matching_c = [c for c in d_m.columns if hero in c]
