@@ -643,8 +643,112 @@ if st.session_state['stored_surveys']:
         else:
             st.info("💡 Upload another month's survey file (e.g. upload June 2026, then upload July 2026) to generate automated multi-month trend charts.")
 
+    # ---------------------------------------------------------
+    # TAB: REDESIGNED EXECUTIVE AI VIEWS & RECOMMENDATIONS
+    # ---------------------------------------------------------
     with tab_ai:
-        st.header(f"💡 AI Executive Summary ({active_m_en} / {active_m_zh})")
+        st.header(f"💡 AI Executive Strategic Summary ({active_m_en} / {active_m_zh})")
+        
+        # Calculate dynamic KPIs
+        sku_calc_list = []
+        for orig_col, clean_name in sku_mapping.items():
+            col_s = df[orig_col].astype(str)
+            in_s = col_s.str.contains('有貨').sum()
+            oos_s = col_s.str.contains('缺貨').sum()
+            cov_r = round((in_s / len(df)) * 100, 1) if len(df) > 0 else 0
+            sku_calc_list.append({'name': clean_name, 'in_stock': in_s, 'oos': oos_s, 'cov': cov_r})
+        df_calc = pd.DataFrame(sku_calc_list)
+        top_stars_web = df_calc.sort_values(by='cov', ascending=False).head(5)
+        top_oos_web = df_calc[df_calc['oos'] > 0].sort_values(by='oos', ascending=False).head(5)
+
+        # 1. Top KPI Metric Cards
+        kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+        with kpi_col1:
+            st.metric("Total Audited Stores", f"{len(df)} 間分店")
+        with kpi_col2:
+            st.metric("18-District Reach", f"{visited_count_18}/18 行政區")
+        with kpi_col3:
+            star_name = top_stars_web.iloc[0]['name'] if len(top_stars_web) > 0 else "N/A"
+            star_cov = top_stars_web.iloc[0]['cov'] if len(top_stars_web) > 0 else 0
+            st.metric("Top Hero Product", f"{star_name} ({star_cov}%)")
+        with kpi_col4:
+            oos_name = top_oos_web.iloc[0]['name'] if len(top_oos_web) > 0 else "None"
+            oos_cnt = top_oos_web.iloc[0]['oos'] if len(top_oos_web) > 0 else 0
+            st.metric("Top OOS Risk Item", f"{oos_name} ({oos_cnt} stores)")
+
+        st.divider()
+
+        # 2. Side-by-Side Visual Charts
+        st.subheader("📊 Executive Visual Insights & Channel Performance")
+        ai_c1, ai_c2 = st.columns(2)
+        with ai_c1:
+            ch_chart_data = df_summary[df_summary['Channel'] != 'Total'].copy()
+            ch_chart_data['Target Visit'] = pd.to_numeric(ch_chart_data['Target Visit'], errors='coerce').fillna(0)
+            ch_chart_data['Actual Visit'] = pd.to_numeric(ch_chart_data['Actual Visit'], errors='coerce').fillna(0)
+            
+            fig_ai_ch = go.Figure(data=[
+                go.Bar(name='目標走訪 (Target)', x=ch_chart_data['Channel'], y=ch_chart_data['Target Visit'], marker_color='#B8CCE4'),
+                go.Bar(name='實際走訪 (Actual)', x=ch_chart_data['Channel'], y=ch_chart_data['Actual Visit'], marker_color='#366092')
+            ])
+            fig_ai_ch.update_layout(barmode='group', title="各大通路目標 vs. 實際走訪數量", height=380)
+            st.plotly_chart(fig_ai_ch, use_container_width=True)
+
+        with ai_c2:
+            fig_ai_star = px.bar(
+                top_stars_web.sort_values(by='cov', ascending=True), 
+                x='cov', y='name', orientation='h', text='cov',
+                title="⭐ 皇牌品項 TOP 5 全港覆蓋率 (%)",
+                color_discrete_sequence=['#4F81BD']
+            )
+            fig_ai_star.update_traces(texttemplate='%{text}%', textposition='outside')
+            fig_ai_star.update_layout(xaxis_title="覆蓋率 (%)", yaxis_title="", height=380)
+            st.plotly_chart(fig_ai_star, use_container_width=True)
+
+        st.divider()
+
+        # 3. Channel Strategy Matrix Table
+        st.subheader("🎯 各通路差異化現況與營運策略矩陣 (Channel Strategy Matrix)")
+        
+        c_sub = df[df['店鋪_clean'].str.contains('7-11|Circle K|OK', regex=True, na=False)]
+        smkt_sub = df[df['店鋪_clean'].str.contains('Wellcome|惠康|ParkNshop|百佳', regex=True, na=False)]
+        kb_sub = df[df['店鋪_clean'].str.contains('佳寶', regex=False, na=False)]
+        prem_sub = df[df['店鋪_clean'].str.contains("Aeon|city'super", regex=True, na=False)]
+
+        matrix_rows = [
+            {
+                "通路類型": "便利店 (7-Eleven / Circle K)",
+                "走訪分店數": f"{len(c_sub)} 間",
+                "主力熱銷品項": "鮮製甜品 (蘆楊、紫米露、紅綠豆沙) 及 500ml 夏枯草",
+                "弱勢/缺貨品項": "豆漿低覆蓋 (4%)；火麻仁拿鐵滯銷；紅綠豆沙及蘆楊局部缺貨",
+                "核心營運與進貨建議": "主攻「即飲消暑與甜品補給」；推行加價購優惠；及時補足甜品冷櫃架面防止缺貨"
+            },
+            {
+                "通路類型": "大眾超市 (Wellcome / PNS)",
+                "走訪分店數": f"{len(smkt_sub)} 間",
+                "主力熱銷品項": "預製涼茶 (夏枯草、雞骨草、竹蔗茅根) 及 1L 家庭裝 (五花茶/甘蔗汁)",
+                "弱勢/缺貨品項": "湯品系列 (20%-38%) 及長尾鮮製糖水滲透率偏低",
+                "核心營運與進貨建議": "主打「家庭囤貨與日常養生」；強化 1L 家庭裝多件促銷；提前於 8-9 月規劃初秋暖湯滋補陳列"
+            },
+            {
+                "通路類型": "平價賣場 (佳寶)",
+                "走訪分店數": f"{len(kb_sub)} 間",
+                "主力熱銷品項": "核心 4 款預製涼茶 (夏枯草、雞骨草、竹蔗、咸柑桔達 90%+)",
+                "弱勢/缺貨品項": "銀菊露 (約 8%-24%) 鋪貨疲弱",
+                "核心營運與進貨建議": "鎖定「極致性價比」；集中資源確保 4 大熱銷款安全庫存，避免長尾滯銷款佔用資金"
+            },
+            {
+                "通路類型": "精品/日系百貨 (Aeon / city'super)",
+                "走訪分店數": f"{len(prem_sub)} 間",
+                "主力熱銷品項": "Aeon 鮮製甜品及特色奶茶 (覆蓋率達 85%-100%)",
+                "弱勢/缺貨品項": "city'super 鮮製短保專區較小，走訪進度尚有缺口",
+                "核心營運與進貨建議": "作為高單價與特色新品 (港式奶茶、黑豆、花膠系列) 試水溫基地；推動擴大冷藏陳列架面"
+            }
+        ]
+        st.dataframe(pd.DataFrame(matrix_rows), use_container_width=True)
+
+        st.divider()
+
+        # 4. Detailed Narrative Section
         st.markdown(ai_generated_text)
 
     # ---------------------------------------------------------
@@ -674,15 +778,16 @@ if st.session_state['stored_surveys']:
         ai_text_fmt = workbook.add_format({
             'font_size': 9, 'font_color': '#333333', 'text_wrap': True, 'valign': 'top', 'indent': 2
         })
-        kpi_hdr_fmt = workbook.add_format({
-            'bold': True, 'font_size': 10, 'font_color': 'white', 'bg_color': '#366092', 'align': 'center', 'border': 1
+        table_hdr_fmt = workbook.add_format({
+            'bold': True, 'font_size': 9, 'font_color': 'white', 'bg_color': '#366092', 'align': 'center', 'valign': 'vcenter', 'border': 1
         })
-        kpi_oos_hdr = workbook.add_format({
-            'bold': True, 'font_size': 10, 'font_color': 'white', 'bg_color': '#C00000', 'align': 'center', 'border': 1
+        table_oos_hdr = workbook.add_format({
+            'bold': True, 'font_size': 9, 'font_color': 'white', 'bg_color': '#C00000', 'align': 'center', 'valign': 'vcenter', 'border': 1
         })
-        kpi_val_fmt = workbook.add_format({'border': 1, 'align': 'center', 'font_size': 9})
-        kpi_pct_fmt = workbook.add_format({'border': 1, 'align': 'center', 'font_size': 9, 'num_format': '0.0%'})
-        kpi_oos_val = workbook.add_format({'border': 1, 'align': 'center', 'font_size': 9, 'font_color': '#C00000', 'bold': True})
+        table_cell_fmt = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter', 'font_size': 9})
+        table_pct_fmt = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter', 'font_size': 9, 'num_format': '0.0%'})
+        table_oos_val = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter', 'font_size': 9, 'font_color': '#C00000', 'bold': True})
+        td_wrap = workbook.add_format({'border': 1, 'font_size': 9, 'valign': 'vcenter', 'text_wrap': True, 'indent': 1})
 
         # 1. Summary Sheet
         df_summary.to_excel(writer, sheet_name='Summary', index=False)
@@ -705,21 +810,79 @@ if st.session_state['stored_surveys']:
         # ---------------------------------------------------------
         ws_ai = workbook.add_worksheet('AI Views & Recommendations')
         ws_ai.hide_gridlines(0)
-        ws_ai.set_column('A:A', 3)
-        ws_ai.set_column('B:B', 32)
-        ws_ai.set_column('C:C', 18)
-        ws_ai.set_column('D:D', 18)
-        ws_ai.set_column('E:E', 18)
-        ws_ai.set_column('F:F', 3)
-        ws_ai.set_column('G:G', 28)
-        ws_ai.set_column('H:H', 15)
-        ws_ai.set_column('I:I', 15)
+        ws_ai.set_column('A:A', 2)
+        ws_ai.set_column('B:B', 20)
+        ws_ai.set_column('C:C', 11)
+        ws_ai.set_column('D:D', 11)
+        ws_ai.set_column('E:E', 12)
+        ws_ai.set_column('F:F', 11)
+        ws_ai.set_column('G:G', 3)
+        ws_ai.set_column('H:H', 22)
+        ws_ai.set_column('I:I', 12)
+        ws_ai.set_column('J:J', 12)
+        ws_ai.set_column('K:K', 14)
+        ws_ai.set_column('L:L', 14)
+        ws_ai.set_column('M:M', 14)
 
         # Title Header Banner
-        ws_ai.merge_range('B2:I2', f'💡 {active_m_en} ({active_m_zh}) 市場巡查 AI 總結分析與營運策略報告 (Executive Strategic Summary)', ai_banner_fmt)
+        ws_ai.merge_range('B2:M2', f'💡 {active_m_en} ({active_m_zh}) 市場巡查 AI 總結分析與營運策略報告 (Executive Strategic Summary)', ai_banner_fmt)
         ws_ai.set_row(1, 28)
 
-        # Precalculate Executive Stats
+        # ---------------------------------------------------------
+        # SECTION 1: 通路巡查目標執行 (Target vs Actual)
+        # ---------------------------------------------------------
+        ws_ai.merge_range('B4:M4', '📊 一、 通路巡查目標執行達成表與對比圖 (Audit Target vs. Actual)', ai_section_hdr)
+        ws_ai.set_row(3, 22)
+
+        headers_ch = ['通路名稱 (Channel)', '目標走訪', '實際走訪', '達成率 (%)', '達成狀況']
+        for c_i, h in enumerate(headers_ch, start=1):
+            ws_ai.write(4, c_i, h, table_hdr_fmt)
+            
+        ch_export_df = df_summary[df_summary['Channel'] != 'Total'].copy()
+        for r_i, (_, row) in enumerate(ch_export_df.iterrows(), start=5):
+            ch_name = str(row['Channel'])
+            tg = int(row['Target Visit']) if str(row['Target Visit']).isdigit() else 0
+            act = int(row['Actual Visit']) if str(row['Actual Visit']).isdigit() else 0
+            rate_val = (act / tg) if tg > 0 else 0
+            st_text = "已達標 🟢" if (tg > 0 and act >= tg) else ("未達標 🔴" if tg > 0 else "無目標 ⚪")
+            
+            ws_ai.write(r_i, 1, ch_name, table_cell_fmt)
+            ws_ai.write(r_i, 2, tg, table_cell_fmt)
+            ws_ai.write(r_i, 3, act, table_cell_fmt)
+            ws_ai.write(r_i, 4, rate_val, table_pct_fmt)
+            ws_ai.write(r_i, 5, st_text, table_cell_fmt)
+
+        # Chart 1: Channel Target vs. Actual on the right (H5:M12)
+        chart_tg_act = workbook.add_chart({'type': 'column'})
+        max_ch_row = len(ch_export_df) + 4
+        chart_tg_act.add_series({
+            'name':       '目標走訪 (Target)',
+            'categories': ['AI Views & Recommendations', 5, 1, max_ch_row, 1],
+            'values':     ['AI Views & Recommendations', 5, 2, max_ch_row, 2],
+            'fill':       {'color': '#B8CCE4'}
+        })
+        chart_tg_act.add_series({
+            'name':       '實際走訪 (Actual)',
+            'categories': ['AI Views & Recommendations', 5, 1, max_ch_row, 1],
+            'values':     ['AI Views & Recommendations', 5, 3, max_ch_row, 3],
+            'fill':       {'color': '#366092'},
+            'data_labels': {'value': True}
+        })
+        chart_tg_act.set_title({'name': '各大通路目標 vs. 實際走訪分店數'})
+        chart_tg_act.set_size({'width': 500, 'height': 200})
+        ws_ai.insert_chart('H5', chart_tg_act)
+
+        # ---------------------------------------------------------
+        # SECTION 2: 皇牌品項與缺貨預警 (Stars & OOS)
+        # ---------------------------------------------------------
+        ws_ai.merge_range('B14:M14', '⭐ 二、 皇牌品項 TOP 5 與門市缺貨 (OOS) 預警 (Hero SKUs & Stockout Alert)', ai_section_hdr)
+        ws_ai.set_row(13, 22)
+
+        # Top 5 Table (B15:E20)
+        ws_ai.merge_range('B15:E15', '⭐ 皇牌熱賣品項 TOP 5 (全港覆蓋率)', table_hdr_fmt)
+        for ci, h in enumerate(['產品 SKU', '走訪有貨分店', '全港覆蓋率', '評級'], start=1):
+            ws_ai.write(15, ci, h, table_hdr_fmt)
+            
         sku_calc = []
         for orig_col, clean_name in sku_mapping.items():
             col_s = df[orig_col].astype(str)
@@ -731,68 +894,105 @@ if st.session_state['stored_surveys']:
         top5_stars = df_ai_calc.sort_values(by='cov', ascending=False).head(5)
         top5_oos = df_ai_calc[df_ai_calc['oos'] > 0].sort_values(by='oos', ascending=False).head(5)
 
-        # Left Mini Table: Top 5 Star SKUs
-        ws_ai.merge_range('B4:D4', '⭐ 皇牌熱賣品項 TOP 5 (全港覆蓋率)', kpi_hdr_fmt)
-        ws_ai.write('B5', '產品 SKU', kpi_hdr_fmt)
-        ws_ai.write('C5', '走訪有貨店鋪數', kpi_hdr_fmt)
-        ws_ai.write('D5', '全港覆蓋率', kpi_hdr_fmt)
-        for idx_k, (_, r_k) in enumerate(top5_stars.iterrows(), start=5):
-            ws_ai.write(idx_k, 1, r_k['name'], kpi_val_fmt)
-            ws_ai.write(idx_k, 2, int(r_k['in_stock']), kpi_val_fmt)
-            ws_ai.write(idx_k, 3, float(r_k['cov']), kpi_pct_fmt)
+        for idx_k, (_, r_k) in enumerate(top5_stars.iterrows(), start=16):
+            ws_ai.write(idx_k, 1, r_k['name'], table_cell_fmt)
+            ws_ai.write(idx_k, 2, int(r_k['in_stock']), table_cell_fmt)
+            ws_ai.write(idx_k, 3, float(r_k['cov']), table_pct_fmt)
+            ws_ai.write(idx_k, 4, get_coverage_rating(r_k['cov'] * 100), table_cell_fmt)
 
-        # Right Mini Table: OOS Hotspots
-        ws_ai.merge_range('G4:I4', '⚠️ 門市缺貨有牌仔 (OOS) 預警名單', kpi_oos_hdr)
-        ws_ai.write('G5', '產品 SKU', kpi_hdr_fmt)
-        ws_ai.write('H5', '缺貨店鋪數', kpi_hdr_fmt)
-        ws_ai.write('I5', '補貨急迫度', kpi_hdr_fmt)
-        for idx_o, (_, r_o) in enumerate(top5_oos.iterrows(), start=5):
-            ws_ai.write(idx_o, 6, r_o['name'], kpi_val_fmt)
-            ws_ai.write(idx_o, 7, int(r_o['oos']), kpi_oos_val)
-            urgency = '緊急 🔴' if r_o['oos'] >= 8 else ('高 🟠' if r_o['oos'] >= 5 else '中 🟡')
-            ws_ai.write(idx_o, 8, urgency, kpi_val_fmt)
-
-        # Insert Bar Chart of Top 5 Stars (positioned at G11, away from text)
+        # Chart 2: Top Star SKUs Coverage Bar Chart (H15:M21)
         chart_top5 = workbook.add_chart({'type': 'bar'})
         chart_top5.add_series({
             'name':       '全港覆蓋率',
-            'categories': ['AI Views & Recommendations', 5, 1, 9, 1],
-            'values':     ['AI Views & Recommendations', 5, 3, 9, 3],
+            'categories': ['AI Views & Recommendations', 16, 1, 20, 1],
+            'values':     ['AI Views & Recommendations', 16, 3, 20, 3],
             'fill':       {'color': '#4F81BD'},
             'data_labels': {'value': True, 'num_format': '0.0%'}
         })
         chart_top5.set_title({'name': 'Top 5 皇牌品項全港覆蓋率 (%)'})
         chart_top5.set_legend({'none': True})
-        chart_top5.set_size({'width': 480, 'height': 220})
-        ws_ai.insert_chart('G11', chart_top5)
+        chart_top5.set_size({'width': 500, 'height': 160})
+        ws_ai.insert_chart('H15', chart_top5)
 
-        # Write Clean Executive Insights Below (Stripped of Markdown Asterisks)
-        curr_row = 11
+        # OOS Table below Top 5 (B22:E27)
+        ws_ai.merge_range('B22:E22', '⚠️ 門市缺貨有牌仔 (OOS) 預警名單', table_oos_hdr)
+        for ci, h in enumerate(['產品 SKU', '缺貨店鋪數', '補貨急迫度', '跟進行動'], start=1):
+            ws_ai.write(22, ci, h, table_oos_hdr)
+
+        for idx_o, (_, r_o) in enumerate(top5_oos.iterrows(), start=23):
+            ws_ai.write(idx_o, 1, r_o['name'], table_cell_fmt)
+            ws_ai.write(idx_o, 2, int(r_o['oos']), table_oos_val)
+            urgency = '緊急 🔴' if r_o['oos'] >= 8 else ('高 🟠' if r_o['oos'] >= 5 else '中 🟡')
+            action = '即時安排車隊補貨' if r_o['oos'] >= 8 else ('核對店長採購配額' if r_o['oos'] >= 5 else '常態排班巡查補位')
+            ws_ai.write(idx_o, 3, urgency, table_cell_fmt)
+            ws_ai.write(idx_o, 4, action, table_cell_fmt)
+
+        # ---------------------------------------------------------
+        # SECTION 3: 通路營運策略矩陣 (Channel Strategy Matrix)
+        # ---------------------------------------------------------
+        ws_ai.merge_range('B29:M29', '🎯 三、 各主要通路現況與營運策略矩陣 (Channel Strategy Matrix)', ai_section_hdr)
+        ws_ai.set_row(28, 22)
+
+        ws_ai.write('B30', '通路類別', table_hdr_fmt)
+        ws_ai.write('C30', '走訪分店', table_hdr_fmt)
+        ws_ai.merge_range('D30:E30', '主力熱銷品項', table_hdr_fmt)
+        ws_ai.merge_range('F30:G30', '弱勢/缺貨品項', table_hdr_fmt)
+        ws_ai.merge_range('H30:M30', '核心營運與進貨建議', table_hdr_fmt)
+
+        matrix_content = [
+            ('便利店 (7-Eleven / Circle K)', f"{len(df[df['店鋪_clean'].str.contains('7-11|Circle K|OK', regex=True, na=False)])} 間",
+             '鮮製甜品 (蘆楊、紫米露、紅綠豆沙) 及 500ml 夏枯草', '豆漿低覆蓋 (4%)；火麻仁拿鐵滯銷；紅綠豆沙及蘆楊局部缺貨',
+             '主攻「即飲消暑與甜品補給」；推行加價購優惠；及時補足甜品冷櫃架面防止缺貨'),
+            ('大眾超市 (Wellcome / PNS)', f"{len(df[df['店鋪_clean'].str.contains('Wellcome|惠康|ParkNshop|百佳', regex=True, na=False)])} 間",
+             '預製涼茶 (夏枯草、雞骨草、竹蔗茅根) 及 1L 家庭裝', '超市湯品系列 (20%-38%) 及長尾鮮製糖水滲透率偏低',
+             '主打「家庭囤貨與日常養生」；強化 1L 家庭裝多件促銷；提前於 8-9 月規劃初秋暖湯滋補陳列'),
+            ('平價賣場 (佳寶)', f"{len(df[df['店鋪_clean'].str.contains('佳寶', regex=False, na=False)])} 間",
+             '核心 4 款預製涼茶 (夏枯草、雞骨草、竹蔗、咸柑桔達 90%+)', '銀菊露 (約 8%-24%) 鋪貨疲弱',
+             '鎖定「極致性價比」；集中資源確保 4 大熱銷款安全庫存，避免長尾滯銷款佔用資金'),
+            ('精品百貨 (Aeon / city\'super)', f"{len(df[df['店鋪_clean'].str.contains(\"Aeon|city'super\", regex=True, na=False)])} 間",
+             'Aeon 鮮製甜品及特色奶茶 (覆蓋率達 85%-100%)', 'city\'super 鮮製短保專區較小，走訪進度尚有缺口',
+             '作為高單價與特色新品 (港式奶茶、黑豆、花膠系列) 試水溫基地；推動擴大冷藏陳列架面')
+        ]
+
+        curr_r = 30
+        for row_c in matrix_content:
+            ws_ai.write(curr_r, 1, row_c[0], table_cell_fmt)
+            ws_ai.write(curr_r, 2, row_c[1], table_cell_fmt)
+            ws_ai.merge_range(curr_r, 3, curr_r, 4, row_c[2], td_wrap)
+            ws_ai.merge_range(curr_r, 5, curr_r, 6, row_c[3], td_wrap)
+            ws_ai.merge_range(curr_r, 7, curr_r, 12, row_c[4], td_wrap)
+            ws_ai.set_row(curr_r, 28)
+            curr_r += 1
+
+        # ---------------------------------------------------------
+        # SECTION 4: 深度市場分析與行動建議 (Detailed Narrative Insights)
+        # ---------------------------------------------------------
+        curr_r += 2
         for raw_line in ai_generated_text.split('\n'):
             line = raw_line.strip()
             if not line or line.startswith('---'):
                 continue
             
-            # Clean all markdown syntax
             clean_str = line.replace('**', '').replace('###', '').replace('####', '').strip()
-            
+            if clean_str.startswith('#'):
+                clean_str = clean_str.lstrip('# ').strip()
+
             if line.startswith('### 📊 一、') or line.startswith('### 🎯 二、'):
-                curr_row += 1
-                ws_ai.merge_range(curr_row, 1, curr_row, 5, clean_str, ai_section_hdr)
-                ws_ai.set_row(curr_row, 22)
-                curr_row += 1
+                curr_r += 1
+                ws_ai.merge_range(curr_r, 1, curr_r, 12, clean_str, ai_section_hdr)
+                ws_ai.set_row(curr_r, 22)
+                curr_r += 1
             elif line.startswith('#### '):
-                ws_ai.write(curr_row, 1, clean_str, ai_subhdr_fmt)
-                curr_row += 1
+                ws_ai.write(curr_r, 1, clean_str, ai_subhdr_fmt)
+                curr_r += 1
             elif line.startswith('* **') or line.startswith('* '):
-                # Clean leading bullets
                 bullet_str = '• ' + clean_str.lstrip('*•- ').strip()
-                ws_ai.merge_range(curr_row, 1, curr_row, 5, bullet_str, ai_text_fmt)
-                ws_ai.set_row(curr_row, 18)
-                curr_row += 1
+                ws_ai.merge_range(curr_r, 1, curr_r, 12, bullet_str, ai_text_fmt)
+                ws_ai.set_row(curr_r, 18)
+                curr_r += 1
             else:
-                ws_ai.merge_range(curr_row, 1, curr_row, 5, clean_str, ai_text_fmt)
-                curr_row += 1
+                ws_ai.merge_range(curr_r, 1, curr_r, 12, clean_str, ai_text_fmt)
+                curr_r += 1
 
         # 4. Multi-Month Historical Trend Sheet (Automatic when >= 2 months loaded)
         if len(sorted_months) > 1:
