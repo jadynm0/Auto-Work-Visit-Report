@@ -498,6 +498,12 @@ if st.session_state['stored_surveys']:
 
     ai_generated_text = generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mapping, active_m_zh)
 
+    # Pre-calculate store counts for channel matrix to prevent f-string backslash errors
+    c_store_cnt = len(df[df['店鋪_clean'].str.contains('7-11|Circle K|OK', regex=True, na=False)])
+    smkt_cnt = len(df[df['店鋪_clean'].str.contains('Wellcome|惠康|ParkNshop|百佳', regex=True, na=False)])
+    kb_cnt = len(df[df['店鋪_clean'].str.contains('佳寶', regex=False, na=False)])
+    prem_cnt = len(df[df['店鋪_clean'].str.contains("Aeon|city'super", regex=True, na=False)])
+
     # ---------------------------------------------------------
     # MAIN DASHBOARD TABS
     # ---------------------------------------------------------
@@ -708,37 +714,32 @@ if st.session_state['stored_surveys']:
 
         # 3. Channel Strategy Matrix Table
         st.subheader("🎯 各通路差異化現況與營運策略矩陣 (Channel Strategy Matrix)")
-        
-        c_sub = df[df['店鋪_clean'].str.contains('7-11|Circle K|OK', regex=True, na=False)]
-        smkt_sub = df[df['店鋪_clean'].str.contains('Wellcome|惠康|ParkNshop|百佳', regex=True, na=False)]
-        kb_sub = df[df['店鋪_clean'].str.contains('佳寶', regex=False, na=False)]
-        prem_sub = df[df['店鋪_clean'].str.contains("Aeon|city'super", regex=True, na=False)]
 
         matrix_rows = [
             {
                 "通路類型": "便利店 (7-Eleven / Circle K)",
-                "走訪分店數": f"{len(c_sub)} 間",
+                "走訪分店數": f"{c_store_cnt} 間",
                 "主力熱銷品項": "鮮製甜品 (蘆楊、紫米露、紅綠豆沙) 及 500ml 夏枯草",
                 "弱勢/缺貨品項": "豆漿低覆蓋 (4%)；火麻仁拿鐵滯銷；紅綠豆沙及蘆楊局部缺貨",
                 "核心營運與進貨建議": "主攻「即飲消暑與甜品補給」；推行加價購優惠；及時補足甜品冷櫃架面防止缺貨"
             },
             {
                 "通路類型": "大眾超市 (Wellcome / PNS)",
-                "走訪分店數": f"{len(smkt_sub)} 間",
+                "走訪分店數": f"{smkt_cnt} 間",
                 "主力熱銷品項": "預製涼茶 (夏枯草、雞骨草、竹蔗茅根) 及 1L 家庭裝 (五花茶/甘蔗汁)",
                 "弱勢/缺貨品項": "湯品系列 (20%-38%) 及長尾鮮製糖水滲透率偏低",
                 "核心營運與進貨建議": "主打「家庭囤貨與日常養生」；強化 1L 家庭裝多件促銷；提前於 8-9 月規劃初秋暖湯滋補陳列"
             },
             {
                 "通路類型": "平價賣場 (佳寶)",
-                "走訪分店數": f"{len(kb_sub)} 間",
+                "走訪分店數": f"{kb_cnt} 間",
                 "主力熱銷品項": "核心 4 款預製涼茶 (夏枯草、雞骨草、竹蔗、咸柑桔達 90%+)",
                 "弱勢/缺貨品項": "銀菊露 (約 8%-24%) 鋪貨疲弱",
                 "核心營運與進貨建議": "鎖定「極致性價比」；集中資源確保 4 大熱銷款安全庫存，避免長尾滯銷款佔用資金"
             },
             {
                 "通路類型": "精品/日系百貨 (Aeon / city'super)",
-                "走訪分店數": f"{len(prem_sub)} 間",
+                "走訪分店數": f"{prem_cnt} 間",
                 "主力熱銷品項": "Aeon 鮮製甜品及特色奶茶 (覆蓋率達 85%-100%)",
                 "弱勢/缺貨品項": "city'super 鮮製短保專區較小，走訪進度尚有缺口",
                 "核心營運與進貨建議": "作為高單價與特色新品 (港式奶茶、黑豆、花膠系列) 試水溫基地；推動擴大冷藏陳列架面"
@@ -856,13 +857,13 @@ if st.session_state['stored_surveys']:
         chart_tg_act = workbook.add_chart({'type': 'column'})
         max_ch_row = len(ch_export_df) + 4
         chart_tg_act.add_series({
-            'name':       '目標走訪 (Target)',
+            'name':       ['AI Views & Recommendations', 4, 2],
             'categories': ['AI Views & Recommendations', 5, 1, max_ch_row, 1],
             'values':     ['AI Views & Recommendations', 5, 2, max_ch_row, 2],
             'fill':       {'color': '#B8CCE4'}
         })
         chart_tg_act.add_series({
-            'name':       '實際走訪 (Actual)',
+            'name':       ['AI Views & Recommendations', 4, 3],
             'categories': ['AI Views & Recommendations', 5, 1, max_ch_row, 1],
             'values':     ['AI Views & Recommendations', 5, 3, max_ch_row, 3],
             'fill':       {'color': '#366092'},
@@ -940,16 +941,16 @@ if st.session_state['stored_surveys']:
         ws_ai.merge_range('H30:M30', '核心營運與進貨建議', table_hdr_fmt)
 
         matrix_content = [
-            ('便利店 (7-Eleven / Circle K)', f"{len(df[df['店鋪_clean'].str.contains('7-11|Circle K|OK', regex=True, na=False)])} 間",
+            ('便利店 (7-Eleven / Circle K)', f"{c_store_cnt} 間",
              '鮮製甜品 (蘆楊、紫米露、紅綠豆沙) 及 500ml 夏枯草', '豆漿低覆蓋 (4%)；火麻仁拿鐵滯銷；紅綠豆沙及蘆楊局部缺貨',
              '主攻「即飲消暑與甜品補給」；推行加價購優惠；及時補足甜品冷櫃架面防止缺貨'),
-            ('大眾超市 (Wellcome / PNS)', f"{len(df[df['店鋪_clean'].str.contains('Wellcome|惠康|ParkNshop|百佳', regex=True, na=False)])} 間",
+            ('大眾超市 (Wellcome / PNS)', f"{smkt_cnt} 間",
              '預製涼茶 (夏枯草、雞骨草、竹蔗茅根) 及 1L 家庭裝', '超市湯品系列 (20%-38%) 及長尾鮮製糖水滲透率偏低',
              '主打「家庭囤貨與日常養生」；強化 1L 家庭裝多件促銷；提前於 8-9 月規劃初秋暖湯滋補陳列'),
-            ('平價賣場 (佳寶)', f"{len(df[df['店鋪_clean'].str.contains('佳寶', regex=False, na=False)])} 間",
+            ('平價賣場 (佳寶)', f"{kb_cnt} 間",
              '核心 4 款預製涼茶 (夏枯草、雞骨草、竹蔗、咸柑桔達 90%+)', '銀菊露 (約 8%-24%) 鋪貨疲弱',
              '鎖定「極致性價比」；集中資源確保 4 大熱銷款安全庫存，避免長尾滯銷款佔用資金'),
-            ('精品百貨 (Aeon / city\'super)', f"{len(df[df['店鋪_clean'].str.contains(\"Aeon|city'super\", regex=True, na=False)])} 間",
+            ('精品百貨 (Aeon / city\'super)', f"{prem_cnt} 間",
              'Aeon 鮮製甜品及特色奶茶 (覆蓋率達 85%-100%)', 'city\'super 鮮製短保專區較小，走訪進度尚有缺口',
              '作為高單價與特色新品 (港式奶茶、黑豆、花膠系列) 試水溫基地；推動擴大冷藏陳列架面')
         ]
