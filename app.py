@@ -142,7 +142,6 @@ def match_sku_deal(survey_sku, client_deals_dict):
 def parse_targets_dynamically(df_targets):
     targets_dict = {}
     total_shops_dict = {}
-    
     col_str = " ".join([str(c).lower() for c in df_targets.columns])
     if 'channel' in col_str or 'target' in col_str or '渠道' in col_str or '目標' in col_str:
         header_row_idx = None
@@ -163,7 +162,6 @@ def parse_targets_dynamically(df_targets):
     ch_col = None
     tg_col = None
     hk_col = None
-    
     for c in df_targets.columns:
         c_low = str(c).lower()
         if 'channel' in c_low or '店' in c_low or '渠道' in c_low:
@@ -186,7 +184,6 @@ def parse_targets_dynamically(df_targets):
             targets_dict[ch_name] = int(float(row[tg_col]))
         except:
             targets_dict[ch_name] = 0
-            
         if hk_col and pd.notnull(row[hk_col]):
             try:
                 total_shops_dict[ch_name] = int(float(row[hk_col]))
@@ -552,7 +549,6 @@ if st.session_state['stored_surveys']:
         st.dataframe(df_choice, use_container_width=True)
 
         # SKU Availability Table
-        st.subheader(f"🛒 {selected_ch} - Detailed SKU Availability")
         sku_details = []
         client_deals = product_listing_deals.get(selected_ch, {})
         for orig_col, clean_name in sku_mapping.items():
@@ -652,17 +648,41 @@ if st.session_state['stored_surveys']:
         st.markdown(ai_generated_text)
 
     # ---------------------------------------------------------
-    # MULTI-TAB EXCEL EXPORT WORKBOOK (WITH MOM HISTORICAL SHEET)
+    # MULTI-TAB EXCEL EXPORT WORKBOOK (WITH CLEAN EXECUTIVE AI FORMAT)
     # ---------------------------------------------------------
     st.divider()
     st.header(f"📥 Download Complete Formatted Excel Report ({active_m_en})")
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'nan_inf_to_errors': True}}) as writer:
         workbook = writer.book
+        
+        # Professional executive palettes
         header_fmt = workbook.add_format({'bold': True, 'bg_color': '#4F81BD', 'font_color': 'white', 'border': 1, 'align': 'center'})
         cell_fmt = workbook.add_format({'border': 1, 'align': 'center'})
-        ai_title_fmt = workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#1F497D'})
-        ai_text_fmt = workbook.add_format({'text_wrap': True, 'font_size': 11})
+        
+        ai_banner_fmt = workbook.add_format({
+            'bold': True, 'font_size': 14, 'font_color': 'white', 
+            'bg_color': '#1F497D', 'align': 'left', 'valign': 'vcenter', 'indent': 1
+        })
+        ai_section_hdr = workbook.add_format({
+            'bold': True, 'font_size': 11, 'font_color': '#1F497D', 
+            'bg_color': '#DCE6F1', 'border': 1, 'valign': 'vcenter', 'indent': 1
+        })
+        ai_subhdr_fmt = workbook.add_format({
+            'bold': True, 'font_size': 10, 'font_color': '#1F497D', 'valign': 'vcenter', 'indent': 1
+        })
+        ai_text_fmt = workbook.add_format({
+            'font_size': 9, 'font_color': '#333333', 'text_wrap': True, 'valign': 'top', 'indent': 2
+        })
+        kpi_hdr_fmt = workbook.add_format({
+            'bold': True, 'font_size': 10, 'font_color': 'white', 'bg_color': '#366092', 'align': 'center', 'border': 1
+        })
+        kpi_oos_hdr = workbook.add_format({
+            'bold': True, 'font_size': 10, 'font_color': 'white', 'bg_color': '#C00000', 'align': 'center', 'border': 1
+        })
+        kpi_val_fmt = workbook.add_format({'border': 1, 'align': 'center', 'font_size': 9})
+        kpi_pct_fmt = workbook.add_format({'border': 1, 'align': 'center', 'font_size': 9, 'num_format': '0.0%'})
+        kpi_oos_val = workbook.add_format({'border': 1, 'align': 'center', 'font_size': 9, 'font_color': '#C00000', 'bold': True})
 
         # 1. Summary Sheet
         df_summary.to_excel(writer, sheet_name='Summary', index=False)
@@ -680,23 +700,105 @@ if st.session_state['stored_surveys']:
             ws_dist.set_column(col_idx, col_idx, max(max_len, 15), cell_fmt)
             ws_dist.write(0, col_idx, col, header_fmt)
 
-        # 3. AI Views & Recommendations Sheet
+        # ---------------------------------------------------------
+        # 3. REDESIGNED EXECUTIVE AI VIEWS & RECOMMENDATIONS SHEET
+        # ---------------------------------------------------------
         ws_ai = workbook.add_worksheet('AI Views & Recommendations')
-        ws_ai.set_column('A:A', 115)
-        ws_ai.write('A1', f'💡 Monthly Market Report: AI Views & Strategic Recommendations ({active_m_en} / {active_m_zh})', ai_title_fmt)
-        clean_lines = [line.strip() for line in ai_generated_text.split('\n') if line.strip()]
-        for r_idx, line in enumerate(clean_lines, start=3):
-            if line.startswith("#") or line.startswith("📊") or line.startswith("💡") or line.startswith("* **"):
-                ws_ai.write(r_idx, 0, line.replace('#', '').strip(), workbook.add_format({'bold': True, 'font_size': 11, 'font_color': '#1F497D'}))
-            else:
-                ws_ai.write(r_idx, 0, line, ai_text_fmt)
+        ws_ai.hide_gridlines(0)
+        ws_ai.set_column('A:A', 3)
+        ws_ai.set_column('B:B', 32)
+        ws_ai.set_column('C:C', 18)
+        ws_ai.set_column('D:D', 18)
+        ws_ai.set_column('E:E', 18)
+        ws_ai.set_column('F:F', 3)
+        ws_ai.set_column('G:G', 28)
+        ws_ai.set_column('H:H', 15)
+        ws_ai.set_column('I:I', 15)
 
-        # 4. Multi-Month Historical Trend Sheet (Exported automatically if >= 2 months loaded)
+        # Title Header Banner
+        ws_ai.merge_range('B2:I2', f'💡 {active_m_en} ({active_m_zh}) 市場巡查 AI 總結分析與營運策略報告 (Executive Strategic Summary)', ai_banner_fmt)
+        ws_ai.set_row(1, 28)
+
+        # Precalculate Executive Stats
+        sku_calc = []
+        for orig_col, clean_name in sku_mapping.items():
+            col_s = df[orig_col].astype(str)
+            in_stk = col_s.str.contains('有貨').sum()
+            oos_c = col_s.str.contains('缺貨').sum()
+            cov_r = (in_stk / len(df)) if len(df) > 0 else 0
+            sku_calc.append({'name': clean_name, 'in_stock': in_stk, 'oos': oos_c, 'cov': cov_r})
+        df_ai_calc = pd.DataFrame(sku_calc)
+        top5_stars = df_ai_calc.sort_values(by='cov', ascending=False).head(5)
+        top5_oos = df_ai_calc[df_ai_calc['oos'] > 0].sort_values(by='oos', ascending=False).head(5)
+
+        # Left Mini Table: Top 5 Star SKUs
+        ws_ai.merge_range('B4:D4', '⭐ 皇牌熱賣品項 TOP 5 (全港覆蓋率)', kpi_hdr_fmt)
+        ws_ai.write('B5', '產品 SKU', kpi_hdr_fmt)
+        ws_ai.write('C5', '走訪有貨店鋪數', kpi_hdr_fmt)
+        ws_ai.write('D5', '全港覆蓋率', kpi_hdr_fmt)
+        for idx_k, (_, r_k) in enumerate(top5_stars.iterrows(), start=5):
+            ws_ai.write(idx_k, 1, r_k['name'], kpi_val_fmt)
+            ws_ai.write(idx_k, 2, int(r_k['in_stock']), kpi_val_fmt)
+            ws_ai.write(idx_k, 3, float(r_k['cov']), kpi_pct_fmt)
+
+        # Right Mini Table: OOS Hotspots
+        ws_ai.merge_range('G4:I4', '⚠️ 門市缺貨有牌仔 (OOS) 預警名單', kpi_oos_hdr)
+        ws_ai.write('G5', '產品 SKU', kpi_hdr_fmt)
+        ws_ai.write('H5', '缺貨店鋪數', kpi_hdr_fmt)
+        ws_ai.write('I5', '補貨急迫度', kpi_hdr_fmt)
+        for idx_o, (_, r_o) in enumerate(top5_oos.iterrows(), start=5):
+            ws_ai.write(idx_o, 6, r_o['name'], kpi_val_fmt)
+            ws_ai.write(idx_o, 7, int(r_o['oos']), kpi_oos_val)
+            urgency = '緊急 🔴' if r_o['oos'] >= 8 else ('高 🟠' if r_o['oos'] >= 5 else '中 🟡')
+            ws_ai.write(idx_o, 8, urgency, kpi_val_fmt)
+
+        # Insert Bar Chart of Top 5 Stars (positioned at G11, away from text)
+        chart_top5 = workbook.add_chart({'type': 'bar'})
+        chart_top5.add_series({
+            'name':       '全港覆蓋率',
+            'categories': ['AI Views & Recommendations', 5, 1, 9, 1],
+            'values':     ['AI Views & Recommendations', 5, 3, 9, 3],
+            'fill':       {'color': '#4F81BD'},
+            'data_labels': {'value': True, 'num_format': '0.0%'}
+        })
+        chart_top5.set_title({'name': 'Top 5 皇牌品項全港覆蓋率 (%)'})
+        chart_top5.set_legend({'none': True})
+        chart_top5.set_size({'width': 480, 'height': 220})
+        ws_ai.insert_chart('G11', chart_top5)
+
+        # Write Clean Executive Insights Below (Stripped of Markdown Asterisks)
+        curr_row = 11
+        for raw_line in ai_generated_text.split('\n'):
+            line = raw_line.strip()
+            if not line or line.startswith('---'):
+                continue
+            
+            # Clean all markdown syntax
+            clean_str = line.replace('**', '').replace('###', '').replace('####', '').strip()
+            
+            if line.startswith('### 📊 一、') or line.startswith('### 🎯 二、'):
+                curr_row += 1
+                ws_ai.merge_range(curr_row, 1, curr_row, 5, clean_str, ai_section_hdr)
+                ws_ai.set_row(curr_row, 22)
+                curr_row += 1
+            elif line.startswith('#### '):
+                ws_ai.write(curr_row, 1, clean_str, ai_subhdr_fmt)
+                curr_row += 1
+            elif line.startswith('* **') or line.startswith('* '):
+                # Clean leading bullets
+                bullet_str = '• ' + clean_str.lstrip('*•- ').strip()
+                ws_ai.merge_range(curr_row, 1, curr_row, 5, bullet_str, ai_text_fmt)
+                ws_ai.set_row(curr_row, 18)
+                curr_row += 1
+            else:
+                ws_ai.merge_range(curr_row, 1, curr_row, 5, clean_str, ai_text_fmt)
+                curr_row += 1
+
+        # 4. Multi-Month Historical Trend Sheet (Automatic when >= 2 months loaded)
         if len(sorted_months) > 1:
             ws_mom = workbook.add_worksheet('MoM Trend Analysis')
             ws_mom.write('A1', '📈 1. Monthly Store Audit Progression by Channel (MoM)', workbook.add_format({'bold': True, 'font_size': 13, 'font_color': '#1F497D'}))
             
-            # Build Channel MoM comparison table
             ch_list = ['7-11', 'Circle K', 'Wellcome', 'ParkNshop', '佳寶', 'Aeon', "city'super", 'UNY', 'Total']
             ch_mom_records = []
             for ch in ch_list:
@@ -713,7 +815,6 @@ if st.session_state['stored_surveys']:
             df_ch_mom_exp = pd.DataFrame(ch_mom_records)
             df_ch_mom_exp.to_excel(writer, sheet_name='MoM Trend Analysis', startrow=2, index=False)
 
-            # Build Hero SKU Coverage MoM table
             start_sku_row = len(df_ch_mom_exp) + 5
             ws_mom.write(start_sku_row - 1, 0, '🛒 2. Core Hero SKU Shelf Coverage % Evolution (MoM)', workbook.add_format({'bold': True, 'font_size': 13, 'font_color': '#1F497D'}))
             
@@ -734,14 +835,12 @@ if st.session_state['stored_surveys']:
             df_sku_mom_exp = pd.DataFrame(sku_mom_records)
             df_sku_mom_exp.to_excel(writer, sheet_name='MoM Trend Analysis', startrow=start_sku_row, index=False)
 
-            # Format MoM columns & add Chart
             for col_i in range(len(df_ch_mom_exp.columns)):
                 ws_mom.set_column(col_i, col_i, 22, cell_fmt)
                 ws_mom.write(2, col_i, df_ch_mom_exp.columns[col_i], header_fmt)
             for col_i in range(len(df_sku_mom_exp.columns)):
                 ws_mom.write(start_sku_row, col_i, df_sku_mom_exp.columns[col_i], header_fmt)
 
-            # Insert Volume Chart
             chart_vol = workbook.add_chart({'type': 'column'})
             max_r = len(df_ch_mom_exp) + 1
             for col_idx_m in range(1, len(df_ch_mom_exp.columns)):
@@ -754,7 +853,7 @@ if st.session_state['stored_surveys']:
             chart_vol.set_size({'width': 650, 'height': 320})
             ws_mom.insert_chart('G3', chart_vol)
 
-        # 5. Channel Sheets Helper
+        # 5. Helper Function for Channel Tabs
         def export_detailed_channel_sheet(sub_df, sheet_name):
             tot_visits = len(sub_df)
             if tot_visits == 0:
