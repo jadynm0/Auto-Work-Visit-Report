@@ -323,7 +323,6 @@ def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mappin
 """
     return text
 
-# Pre-calculate store counts for channel matrix to prevent f-string backslash errors
 def get_channel_counts(df):
     c_store = len(df[df['店鋪_clean'].str.contains('7-11|Circle K|OK', regex=True, na=False)])
     smkt = len(df[df['店鋪_clean'].str.contains('Wellcome|惠康|ParkNshop|百佳', regex=True, na=False)])
@@ -878,7 +877,7 @@ if st.session_state['stored_surveys']:
         ws_ai.insert_chart(f'H{start_sec1 + 1}', chart_tg_act)
 
         # Section 2: Top 5 & OOS (Dynamic Starting Row to Prevent Overwrite)
-        start_sec2 = max(end_sec1 + 2, 16)
+        start_sec2 = max(end_sec1 + 2, 17)
         ws_ai.merge_range(f'B{start_sec2}:M{start_sec2}', '⭐ 二、 皇牌品項 TOP 5 與門市缺貨 (OOS) 預警 (Hero SKUs & Stockout Alert)', ai_section_hdr)
         ws_ai.set_row(start_sec2 - 1, 22)
 
@@ -1055,7 +1054,7 @@ if st.session_state['stored_surveys']:
             chart_vol.set_size({'width': 650, 'height': 320})
             ws_mom.insert_chart('G3', chart_vol)
 
-        # 5. Helper Function for Channel Tabs
+        # 5. Helper Function for Channel Tabs (DYNAMIC FOR ALL SKUs)
         def export_detailed_channel_sheet(sub_df, sheet_name):
             tot_visits = len(sub_df)
             if tot_visits == 0:
@@ -1127,29 +1126,33 @@ if st.session_state['stored_surveys']:
                 max_len = max(df_sku_details[col].astype(str).map(len).max(), len(str(col))) + 5
                 ws.set_column(col_idx, col_idx, max(max_len, 15), cell_fmt)
 
+            # Dynamic Bar Chart capturing 100% of SKUs without cutoff
             if sheet_name != "All Stores (Overall)" and len(df_sku_details) > 0:
                 chart_shop = workbook.add_chart({'type': 'column', 'subtype': 'stacked'})
                 max_sku_row = len(df_sku_details) + 7
                 chart_shop.add_series({
                     'name':       [sheet_name, 7, 3],
-                    'categories': [sheet_name, 8, 1, min(max_sku_row, 30), 1],
-                    'values':     [sheet_name, 8, 3, min(max_sku_row, 30), 3],
+                    'categories': [sheet_name, 8, 1, max_sku_row, 1],
+                    'values':     [sheet_name, 8, 3, max_sku_row, 3],
                     'fill':       {'color': '#2ca02c'}
                 })
                 chart_shop.add_series({
                     'name':       [sheet_name, 7, 4],
-                    'categories': [sheet_name, 8, 1, min(max_sku_row, 30), 1],
-                    'values':     [sheet_name, 8, 4, min(max_sku_row, 30), 4],
+                    'categories': [sheet_name, 8, 1, max_sku_row, 1],
+                    'values':     [sheet_name, 8, 4, max_sku_row, 4],
                     'fill':       {'color': '#d62728'}
                 })
                 chart_shop.add_series({
                     'name':       [sheet_name, 7, 5],
-                    'categories': [sheet_name, 8, 1, min(max_sku_row, 30), 1],
-                    'values':     [sheet_name, 8, 5, min(max_sku_row, 30), 5],
+                    'categories': [sheet_name, 8, 1, max_sku_row, 1],
+                    'values':     [sheet_name, 8, 5, max_sku_row, 5],
                     'fill':       {'color': '#a6a6a6'}
                 })
                 chart_shop.set_title({'name': f'{sheet_name} - Listed Products Availability'})
-                chart_shop.set_size({'width': 750, 'height': 380})
+                
+                # Dynamic width scaling so labels never cramp
+                chart_width = max(750, len(df_sku_details) * 26)
+                chart_shop.set_size({'width': chart_width, 'height': 380})
                 ws.insert_chart('J8', chart_shop)
 
         export_detailed_channel_sheet(df, 'All Stores (Overall)')
