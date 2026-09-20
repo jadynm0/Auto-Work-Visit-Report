@@ -88,7 +88,6 @@ def get_product_category(sku_name):
         return 'Room-Temperature Beverages (常溫/預製飲品)'
 
 def format_reporting_month(m_key):
-    """Converts 202606 -> ('June 2026', '2026年6月')"""
     m_match = re.search(r'(\d{4})(\d{2})', str(m_key))
     if m_match:
         year, month = m_match.group(1), m_match.group(2)
@@ -215,7 +214,7 @@ def generate_dynamic_market_insights(df, df_summary, df_dist_summary, sku_mappin
     for orig_col, clean_name in sku_mapping.items():
         col_s = df[orig_col].astype(str)
         in_stk = col_s.str.contains('有貨').sum()
-        oos = col_s.str.contains('缺貨').sum()
+        oos = (col_s.str.contains('缺貨') & ~col_s.str.contains('有貨')).sum()
         cov = round((in_stk / total_audits) * 100, 1) if total_audits > 0 else 0
         cat = get_product_category(clean_name)
         sku_stats.append({
@@ -562,8 +561,8 @@ if st.session_state['stored_surveys']:
         for orig_col, clean_name in sku_mapping.items():
             col_s = df_ch[orig_col].astype(str)
             has_stock = col_s.str.contains('有貨').sum()
-            oos_tag = col_s.str.contains('缺貨').sum()
-            no_tag = col_s.str.contains('無貨').sum()
+            oos_tag = (col_s.str.contains('缺貨') & ~col_s.str.contains('有貨')).sum()
+            no_tag = tot_v - has_stock - oos_tag
             cov = round((has_stock / tot_v) * 100, 1) if tot_v > 0 else 0
             cat = get_product_category(clean_name)
             
@@ -661,7 +660,7 @@ if st.session_state['stored_surveys']:
         for orig_col, clean_name in sku_mapping.items():
             col_s = df[orig_col].astype(str)
             in_s = col_s.str.contains('有貨').sum()
-            oos_s = col_s.str.contains('缺貨').sum()
+            oos_s = (col_s.str.contains('缺貨') & ~col_s.str.contains('有貨')).sum()
             cov_r = round((in_s / len(df)) * 100, 1) if len(df) > 0 else 0
             sku_calc_list.append({'name': clean_name, 'in_stock': in_s, 'oos': oos_s, 'cov': cov_r})
         df_calc = pd.DataFrame(sku_calc_list)
@@ -890,7 +889,7 @@ if st.session_state['stored_surveys']:
         for orig_col, clean_name in sku_mapping.items():
             col_s = df[orig_col].astype(str)
             in_stk = col_s.str.contains('有貨').sum()
-            oos_c = col_s.str.contains('缺貨').sum()
+            oos_c = (col_s.str.contains('缺貨') & ~col_s.str.contains('有貨')).sum()
             cov_r = (in_stk / len(df)) if len(df) > 0 else 0
             sku_calc.append({'name': clean_name, 'in_stock': in_stk, 'oos': oos_c, 'cov': cov_r})
         df_ai_calc = pd.DataFrame(sku_calc)
@@ -1078,8 +1077,8 @@ if st.session_state['stored_surveys']:
             for orig_col, clean_name in sku_mapping.items():
                 col_series = sub_df[orig_col].astype(str)
                 has_stock = col_series.str.contains('有貨').sum()
-                oos_tag = col_series.str.contains('缺貨').sum()
-                no_tag = col_series.str.contains('無貨').sum()
+                oos_tag = (col_series.str.contains('缺貨') & ~col_series.str.contains('有貨')).sum()
+                no_tag = tot_visits - has_stock - oos_tag
                 cov = round((has_stock / tot_visits) * 100, 1) if tot_visits > 0 else 0
                 cat = get_product_category(clean_name)
                 
@@ -1150,7 +1149,6 @@ if st.session_state['stored_surveys']:
                 })
                 chart_shop.set_title({'name': f'{sheet_name} - Listed Products Availability'})
                 
-                # Dynamic width scaling so labels never cramp
                 chart_width = max(750, len(df_sku_details) * 26)
                 chart_shop.set_size({'width': chart_width, 'height': 380})
                 ws.insert_chart('J8', chart_shop)
