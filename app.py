@@ -30,17 +30,21 @@ with col_up2:
         type=["xlsx"]
     )
 
-# 1. Standard Fallback KA Monthly Targets
-DEFAULT_KA_TARGETS = {
-    '7-11': 100,
-    'Circle K': 40,
-    'Wellcome': 20,
-    'ParkNshop': 20,
-    '佳寶': 20,
-    'Aeon': 10,
-    "city'super": 10,
-    'UNY': 0
+# 1. Master Total Shops & Monthly Target Configuration (Official KA & Min. Chain Data)
+MASTER_ACCOUNT_CONFIG = {
+    '7-11':       {'total_shops': 1130, 'target': 100, 'type': 'KA Account'},
+    'Circle K':   {'total_shops': 350,  'target': 40,  'type': 'KA Account'},
+    'Wellcome':   {'total_shops': 324,  'target': 20,  'type': 'KA Account'},
+    'ParkNshop':  {'total_shops': 236,  'target': 20,  'type': 'KA Account'},
+    '佳寶':        {'total_shops': 90,   'target': 20,  'type': 'Min. Chain'},
+    'Aeon':       {'total_shops': 13,   'target': 9,   'type': 'Min. Chain'},
+    "city'super": {'total_shops': 7,    'target': 6,   'type': 'Min. Chain'},
+    'CITISTORE':  {'total_shops': 5,    'target': 2,   'type': 'Min. Chain'},
+    'UNY':        {'total_shops': 4,    'target': 3,   'type': 'Min. Chain'}
 }
+
+DEFAULT_KA_TARGETS = {k: v['target'] for k, v in MASTER_ACCOUNT_CONFIG.items()}
+DEFAULT_TOTAL_SHOPS = {k: v['total_shops'] for k, v in MASTER_ACCOUNT_CONFIG.items()}
 
 # 2. 18 HK Administrative Districts Grouped by Region
 HK_REGION_GROUPS = {
@@ -51,14 +55,14 @@ HK_REGION_GROUPS = {
 
 # 3. Standard Client Name Map for Bilingual Alignment
 CLIENT_NAME_MAP = {
-    'Wellcome': ['Wellcome', '惠康'],
-    'ParkNshop': ['ParkNshop', 'ParknShop', '百佳'],
-    '7-11': ['7-11', '7/11', '07-11', '2026-07-11'],
-    'Circle K': ['Circle K', 'OK'],
+    'Wellcome': ['Wellcome', '惠康', 'WCL', 'WCL 惠康'],
+    'ParkNshop': ['ParkNshop', 'ParknShop', '百佳', 'PNS', 'PNS 百佳'],
+    '7-11': ['7-11', '7/11', '07-11', '2026-07-11', '7-Eleven'],
+    'Circle K': ['Circle K', 'OK', 'Circle-K'],
     '佳寶': ['佳寶'],
-    'Aeon': ['Aeon', 'AEON'],
-    "city'super": ["city'super", "City Super", "City\nSuper", "CitySuper"],
-    'CitiStore': ['CitiStore', '千色', 'CITI STORE'],
+    'Aeon': ['Aeon', 'AEON', '吉之島', 'AEON (吉之島)'],
+    "city'super": ["city'super", "City Super", "City\nSuper", "CitySuper", "CITYSUPER"],
+    'CITISTORE': ['CitiStore', '千色', 'CITI STORE', 'CITISTORE'],
     '永安': ['永安', 'Wing On'],
     'UNY': ['UNY']
 }
@@ -168,7 +172,7 @@ def parse_targets_dynamically(df_targets):
         elif 'target' in c_low or '目標' in c_low:
             if tg_col is None:
                 tg_col = c
-        elif 'total' in c_low or 'hk' in c_low or '總數' in c_low:
+        elif 'total' in c_low or 'hk' in c_low or '總數' in c_low or '分店' in c_low:
             hk_col = c
             
     if ch_col is None and len(df_targets.columns) > 0:
@@ -178,7 +182,11 @@ def parse_targets_dynamically(df_targets):
         
     for _, row in df_targets.dropna(subset=[ch_col]).iterrows():
         ch_raw = str(row[ch_col]).strip()
-        ch_name = '7-11' if any(k in ch_raw for k in ['07-11', '7-11', '7/11', '2026-07-11']) else ch_raw
+        ch_name = ch_raw
+        for std_name, aliases in CLIENT_NAME_MAP.items():
+            if any(a.lower() in ch_raw.lower() for a in aliases):
+                ch_name = std_name
+                break
         try:
             targets_dict[ch_name] = int(float(row[tg_col]))
         except:
@@ -326,7 +334,7 @@ def get_channel_counts(df):
     c_store = len(df[df['店鋪_clean'].str.contains('7-11|Circle K|OK', regex=True, na=False)])
     smkt = len(df[df['店鋪_clean'].str.contains('Wellcome|惠康|ParkNshop|百佳', regex=True, na=False)])
     kb = len(df[df['店鋪_clean'].str.contains('佳寶', regex=False, na=False)])
-    prem = len(df[df['店鋪_clean'].str.contains("Aeon|city'super", regex=True, na=False)])
+    prem = len(df[df['店鋪_clean'].str.contains("Aeon|city'super|CITISTORE|千色|UNY", regex=True, na=False)])
     return c_store, smkt, kb, prem
 
 # ---------------------------------------------------------
@@ -421,9 +429,9 @@ if st.session_state['stored_surveys']:
         return match.group(1).strip() if match else str(col_name).strip()
     sku_mapping = {col: clean_sku_name(col) for col in sku_cols}
 
-    # Dynamic target parsing with DEFAULT_KA_TARGETS fallback
+    # Dynamic target & total shops parsing with MASTER_ACCOUNT_CONFIG fallback
     targets_dict = DEFAULT_KA_TARGETS.copy()
-    total_shops_dict = {}
+    total_shops_dict = DEFAULT_TOTAL_SHOPS.copy()
     try:
         excel_obj = pd.ExcelFile(io.BytesIO(active_bytes))
         target_sheets = [s for s in excel_obj.sheet_names if any(k in s.lower() for k in ['target', 'summary', '目標'])]
@@ -462,7 +470,11 @@ if st.session_state['stored_surveys']:
 
     summary_rows = []
     for ch in all_channels:
-        ch_name = '7-11' if any(k in str(ch) for k in ['7-11', '7/11', '07-11']) else str(ch)
+        ch_name = ch
+        for std_name, aliases in CLIENT_NAME_MAP.items():
+            if any(a.lower() in str(ch).lower() for a in aliases):
+                ch_name = std_name
+                break
         if any(r['Channel'] == ch_name for r in summary_rows):
             continue
         sub_df = df[df['店鋪_clean'].str.contains(ch_name, regex=False, na=False)]
@@ -512,14 +524,17 @@ if st.session_state['stored_surveys']:
 
     with tab_dash:
         st.header(f"📌 {active_m_en} ({active_m_zh}) Market Visit Summary")
-        m_col1, m_col2 = st.columns([1, 2])
-        m_col1.metric("Total Stores Audited", len(df))
-        m_col2.metric("HK 18-District Coverage", f"{visited_count_18}/18 Administrative Districts Audited")
+        m_col1, m_col2, m_col3 = st.columns([1, 1.2, 1.2])
+        m_col1.metric("Total Stores Audited", f"{len(df)} 間分店")
+        m_col2.metric("HK 18-District Coverage", f"{visited_count_18}/18 行政區")
+        total_hk_universe = total_row["Total Shop in HK"]
+        overall_mkt_penetration = f"{round((len(df)/total_hk_universe)*100, 1)}%" if total_hk_universe > 0 else "N/A"
+        m_col3.metric("HK Market Penetration", overall_mkt_penetration)
 
         with st.expander("📍 View Regional & District Breakdown (港島 / 九龍 / 新界及離島)", expanded=False):
             st.dataframe(df_dist_summary, use_container_width=True)
 
-        col1, col2 = st.columns([1.4, 1])
+        col1, col2 = st.columns([1.5, 1])
         with col1:
             st.subheader("Channel & Salesperson Breakdown")
             st.dataframe(df_summary, use_container_width=True)
@@ -738,7 +753,7 @@ if st.session_state['stored_surveys']:
                 "核心營運與進貨建議": "鎖定「極致性價比」；集中資源確保 4 大熱銷款安全庫存，避免長尾滯銷款佔用資金"
             },
             {
-                "通路類型": "精品/日系百貨 (Aeon / city'super)",
+                "通路類型": "精品/日系百貨 (Aeon / city'super / UNY / 千色)",
                 "走訪分店數": f"{p_cnt} 間",
                 "主力熱銷品項": "Aeon 鮮製甜品及特色奶茶 (覆蓋率達 85%-100%)",
                 "弱勢/缺貨品項": "city'super 鮮製短保專區較小，走訪進度尚有缺口",
@@ -794,7 +809,7 @@ if st.session_state['stored_surveys']:
         ws_summary = writer.sheets['Summary']
         for col_idx, col in enumerate(df_summary.columns):
             max_len = max(df_summary[col].astype(str).map(len).max(), len(str(col))) + 5
-            ws_summary.set_column(col_idx, col_idx, max(max_len, 12), cell_fmt)
+            ws_summary.set_column(col_idx, col_idx, max(max_len, 14), cell_fmt)
             ws_summary.write(0, col_idx, col, header_fmt)
 
         # 2. District Coverage Sheet
@@ -812,10 +827,10 @@ if st.session_state['stored_surveys']:
         ws_ai.hide_gridlines(0)
         ws_ai.set_column('A:A', 2)
         ws_ai.set_column('B:B', 20)
-        ws_ai.set_column('C:C', 11)
+        ws_ai.set_column('C:C', 12)
         ws_ai.set_column('D:D', 11)
-        ws_ai.set_column('E:E', 12)
-        ws_ai.set_column('F:F', 11)
+        ws_ai.set_column('E:E', 11)
+        ws_ai.set_column('F:F', 12)
         ws_ai.set_column('G:G', 3)
         ws_ai.set_column('H:H', 22)
         ws_ai.set_column('I:I', 12)
@@ -838,41 +853,47 @@ if st.session_state['stored_surveys']:
         ws_ai.merge_range(f'B{start_sec1}:M{start_sec1}', '📊 一、 通路巡查目標執行達成表與對比圖 (Audit Target vs. Actual)', ai_section_hdr)
         ws_ai.set_row(start_sec1 - 1, 22)
 
-        headers_ch = ['通路名稱 (Channel)', '目標走訪', '實際走訪', '達成率 (%)', '達成狀況']
-        for c_i, h in enumerate(headers_ch, start=1):
-            ws_ai.write(start_sec1, c_i, h, table_hdr_fmt)
+        headers_ch = ['通路名稱 (Channel)', '全港分店總數', '目標走訪', '實際走訪', '達成率 (%)', '達成狀況']
+        ws_ai.write(start_sec1, 1, '通路名稱 (Channel)', table_hdr_fmt)
+        ws_ai.write(start_sec1, 2, '全港分店總數', table_hdr_fmt)
+        ws_ai.write(start_sec1, 3, '目標走訪', table_hdr_fmt)
+        ws_ai.write(start_sec1, 4, '實際走訪', table_hdr_fmt)
+        ws_ai.write(start_sec1, 5, '達成率 (%)', table_hdr_fmt)
+        ws_ai.write(start_sec1, 6, '達成狀況', table_hdr_fmt)
             
         for r_i, (_, row) in enumerate(ch_export_df.iterrows(), start=start_sec1 + 1):
             ch_name = str(row['Channel'])
+            tot_s = row['Total Shop in HK']
             tg = int(row['Target Visit']) if str(row['Target Visit']).isdigit() else 0
             act = int(row['Actual Visit']) if str(row['Actual Visit']).isdigit() else 0
             rate_val = (act / tg) if tg > 0 else 0
             st_text = "已達標 🟢" if (tg > 0 and act >= tg) else ("未達標 🔴" if tg > 0 else "無目標 ⚪")
             
             ws_ai.write(r_i, 1, ch_name, table_cell_fmt)
-            ws_ai.write(r_i, 2, tg, table_cell_fmt)
-            ws_ai.write(r_i, 3, act, table_cell_fmt)
-            ws_ai.write(r_i, 4, rate_val, table_pct_fmt)
-            ws_ai.write(r_i, 5, st_text, table_cell_fmt)
+            ws_ai.write(r_i, 2, tot_s if isinstance(tot_s, int) else 'N/A', table_cell_fmt)
+            ws_ai.write(r_i, 3, tg, table_cell_fmt)
+            ws_ai.write(r_i, 4, act, table_cell_fmt)
+            ws_ai.write(r_i, 5, rate_val, table_pct_fmt)
+            ws_ai.write(r_i, 6, st_text, table_cell_fmt)
 
         # Chart 1: Channel Target vs. Actual on the right (Cols H:M)
         chart_tg_act = workbook.add_chart({'type': 'column'})
         max_ch_row = start_sec1 + num_ch
         chart_tg_act.add_series({
-            'name':       ['AI Views & Recommendations', start_sec1, 2],
-            'categories': ['AI Views & Recommendations', start_sec1 + 1, 1, max_ch_row, 1],
-            'values':     ['AI Views & Recommendations', start_sec1 + 1, 2, max_ch_row, 2],
-            'fill':       {'color': '#B8CCE4'}
-        })
-        chart_tg_act.add_series({
             'name':       ['AI Views & Recommendations', start_sec1, 3],
             'categories': ['AI Views & Recommendations', start_sec1 + 1, 1, max_ch_row, 1],
             'values':     ['AI Views & Recommendations', start_sec1 + 1, 3, max_ch_row, 3],
+            'fill':       {'color': '#B8CCE4'}
+        })
+        chart_tg_act.add_series({
+            'name':       ['AI Views & Recommendations', start_sec1, 4],
+            'categories': ['AI Views & Recommendations', start_sec1 + 1, 1, max_ch_row, 1],
+            'values':     ['AI Views & Recommendations', start_sec1 + 1, 4, max_ch_row, 4],
             'fill':       {'color': '#366092'},
             'data_labels': {'value': True}
         })
         chart_tg_act.set_title({'name': '各大通路目標 vs. 實際走訪分店數'})
-        chart_tg_act.set_size({'width': 500, 'height': 210})
+        chart_tg_act.set_size({'width': 500, 'height': 220})
         ws_ai.insert_chart(f'H{start_sec1 + 1}', chart_tg_act)
 
         # Section 2: Top 5 & OOS (Dynamic Starting Row to Prevent Overwrite)
@@ -951,7 +972,7 @@ if st.session_state['stored_surveys']:
             ('平價賣場 (佳寶)', f"{k_cnt} 間",
              '核心 4 款預製涼茶 (夏枯草、雞骨草、竹蔗、咸柑桔達 90%+)', '銀菊露 (約 8%-24%) 鋪貨疲弱',
              '鎖定「極致性價比」；集中資源確保 4 大熱銷款安全庫存，避免長尾滯銷款佔用資金'),
-            ('精品百貨 (Aeon / city\'super)', f"{p_cnt} 間",
+            ('精品百貨 (Aeon / city\'super / UNY / 千色)', f"{p_cnt} 間",
              'Aeon 鮮製甜品及特色奶茶 (覆蓋率達 85%-100%)', 'city\'super 鮮製短保專區較小，走訪進度尚有缺口',
              '作為高單價與特色新品 (港式奶茶、黑豆、花膠系列) 試水溫基地；推動擴大冷藏陳列架面')
         ]
@@ -999,7 +1020,7 @@ if st.session_state['stored_surveys']:
             ws_mom = workbook.add_worksheet('MoM Trend Analysis')
             ws_mom.write('A1', '📈 1. Monthly Store Audit Progression by Channel (MoM)', workbook.add_format({'bold': True, 'font_size': 13, 'font_color': '#1F497D'}))
             
-            ch_list = ['7-11', 'Circle K', 'Wellcome', 'ParkNshop', '佳寶', 'Aeon', "city'super", 'UNY', 'Total']
+            ch_list = ['7-11', 'Circle K', 'Wellcome', 'ParkNshop', '佳寶', 'Aeon', "city'super", 'CITISTORE', 'UNY', 'Total']
             ch_mom_records = []
             for ch in ch_list:
                 rec = {'Channel': ch}
